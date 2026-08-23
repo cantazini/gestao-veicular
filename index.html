@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sistema interno para cadastro e realização de vistorias de veículos.">
+  <title>VistoriaFrota</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <svg class="svg-definitions" aria-hidden="true">
+    <symbol id="icon-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></symbol>
+    <symbol id="icon-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></symbol>
+    <symbol id="icon-car" viewBox="0 0 24 24"><path d="M5 17h14l1-5-3-5H7l-3 5 1 5Z"/><path d="M5 17v2M19 17v2M4 12h16M8 15h.01M16 15h.01"/></symbol>
+    <symbol id="icon-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="icon-building" viewBox="0 0 24 24"><path d="M4 21V5l8-3 8 3v16M9 9h1M14 9h1M9 13h1M14 13h1M9 17h1M14 17h1M2 21h20"/></symbol>
+    <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+    <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+    <symbol id="icon-edit" viewBox="0 0 24 24"><path d="m14 5 5 5M4 20l4-1 11-11a2.1 2.1 0 0 0-3-3L5 16l-1 4Z"/></symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/></symbol>
+    <symbol id="icon-camera" viewBox="0 0 24 24"><path d="M4 7h3l2-3h6l2 3h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="icon-file" viewBox="0 0 24 24"><path d="M6 2h8l4 4v16H6zM14 2v5h5M9 12h6M9 16h6"/></symbol>
+    <symbol id="icon-print" viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></symbol>
+  </svg>
+
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Menu principal">
+      <div class="brand">
+        <div class="brand-mark"><svg><use href="#icon-check"></use></svg></div>
+        <div><strong>VistoriaFrota</strong><span>Gestão de veículos</span></div>
+      </div>
+
+      <nav class="navigation">
+        <button class="nav-link active" data-page="dashboard"><svg><use href="#icon-grid"></use></svg><span>Dashboard</span></button>
+        <button class="nav-link" data-page="nova-vistoria"><svg><use href="#icon-check"></use></svg><span>Nova Vistoria</span></button>
+        <button class="nav-link" data-page="historico"><svg><use href="#icon-history"></use></svg><span>Histórico</span></button>
+        <button class="nav-link" data-page="veiculos"><svg><use href="#icon-car"></use></svg><span>Veículos</span></button>
+        <button class="nav-link" data-page="motoristas"><svg><use href="#icon-user"></use></svg><span>Motoristas</span></button>
+        <button class="nav-link" data-page="empresas"><svg><use href="#icon-building"></use></svg><span>Empresas</span></button>
+        <button class="nav-link" data-page="exportar"><svg><use href="#icon-download"></use></svg><span>Exportar Dados</span></button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span class="mode-badge" id="storage-mode"><span class="mode-dot"></span>Verificando...</span>
+        <small id="storage-description">Preparando armazenamento</small>
+      </div>
+    </aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <main class="main-content">
+      <header class="topbar">
+        <button class="icon-button menu-toggle" id="menu-toggle" aria-label="Abrir menu"><svg><use href="#icon-menu"></use></svg></button>
+        <div>
+          <h1 id="page-title">Dashboard</h1>
+          <p id="page-subtitle">Visão geral da operação</p>
+        </div>
+        <div class="topbar-actions">
+          <span class="today" id="current-date"></span>
+          <button class="button button-primary compact" data-go-page="nova-vistoria"><svg><use href="#icon-plus"></use></svg>Nova vistoria</button>
+        </div>
+      </header>
+
+      <div class="content-area">
+        <section class="page active" id="page-dashboard" data-title="Dashboard" data-subtitle="Visão geral da operação">
+          <div class="metric-grid">
+            <article class="metric-card"><span class="metric-icon blue"><svg><use href="#icon-check"></use></svg></span><div><span>Total de vistorias</span><strong id="metric-vistorias">0</strong></div></article>
+            <article class="metric-card"><span class="metric-icon teal"><svg><use href="#icon-car"></use></svg></span><div><span>Total de veículos</span><strong id="metric-veiculos">0</strong></div></article>
+            <article class="metric-card"><span class="metric-icon violet"><svg><use href="#icon-user"></use></svg></span><div><span>Total de motoristas</span><strong id="metric-motoristas">0</strong></div></article>
+            <article class="metric-card"><span class="metric-icon amber"><svg><use href="#icon-building"></use></svg></span><div><span>Total de empresas</span><strong id="metric-empresas">0</strong></div></article>
+            <article class="metric-card attention"><span class="metric-icon red">!</span><div><span>Com não conformidades</span><strong id="metric-nao-conformes">0</strong></div></article>
+          </div>
+
+          <article class="card">
+            <div class="card-header"><div><h2>Últimas vistorias</h2><p>Registros mais recentes realizados pela equipe.</p></div><button class="button button-secondary compact" data-go-page="historico">Ver histórico</button></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Data</th><th>Empresa</th><th>Veículo</th><th>Fiscalizador</th><th>Resultado</th></tr></thead>
+                <tbody id="dashboard-latest"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="page" id="page-nova-vistoria" data-title="Nova Vistoria" data-subtitle="Preencha os dados e avalie o veículo">
+          <form id="vistoria-form" novalidate>
+            <article class="card form-section">
+              <div class="section-heading"><span>1</span><div><h2>Identificação</h2><p>Selecione os envolvidos e o veículo.</p></div></div>
+              <div class="form-grid cols-3">
+                <label class="field"><span>Empresa *</span><select id="vistoria-empresa" required><option value="">Selecione</option></select></label>
+                <label class="field"><span>Motorista *</span><select id="vistoria-motorista" required disabled><option value="">Selecione uma empresa</option></select></label>
+                <label class="field"><span>Veículo *</span><select id="vistoria-veiculo" required disabled><option value="">Selecione uma empresa</option></select></label>
+              </div>
+              <div class="selection-summary" id="vistoria-summary" hidden></div>
+              <div class="form-grid cols-4">
+                <label class="field"><span>Data da vistoria *</span><input type="date" id="vistoria-data" required></label>
+                <label class="field"><span>Hora da vistoria *</span><input type="time" id="vistoria-hora" required></label>
+                <label class="field span-2"><span>Nome do fiscalizador *</span><input type="text" id="vistoria-fiscalizador" maxlength="120" placeholder="Nome de quem realizou a vistoria" required></label>
+                <label class="field"><span>Quilometragem atual *</span><input type="number" id="vistoria-km" min="0" step="1" placeholder="Ex.: 48500" required></label>
+              </div>
+            </article>
+
+            <article class="card form-section">
+              <div class="section-heading"><span>2</span><div><h2>Checklist do veículo</h2><p>Avalie todos os itens. Uma observação será solicitada para itens não conformes.</p></div></div>
+              <div class="checklist" id="checklist-container"></div>
+            </article>
+
+            <article class="card form-section">
+              <div class="section-heading"><span>3</span><div><h2>Fotos do Veículo</h2><p>Adicione evidências fotográficas, se necessário. As fotos são opcionais.</p></div></div>
+              <div class="photo-upload-grid" id="photo-upload-grid"></div>
+              <div class="photo-storage-note"><svg><use href="#icon-camera"></use></svg><span>As imagens são otimizadas automaticamente para ocupar menos espaço no Modo local.</span></div>
+            </article>
+
+            <article class="card form-section">
+              <div class="section-heading"><span>4</span><div><h2>Resultado</h2><p>O resultado é calculado automaticamente.</p></div></div>
+              <div class="result-banner approved" id="vistoria-result-banner"><span>Resultado da vistoria</span><strong id="vistoria-result">APROVADO</strong><small>Nenhuma não conformidade identificada.</small></div>
+              <label class="field"><span>Observações gerais</span><textarea id="vistoria-observacoes" rows="4" maxlength="1000" placeholder="Registre aqui informações complementares, se necessário."></textarea></label>
+              <div class="form-actions"><button type="button" class="button button-ghost" id="vistoria-clear">Limpar</button><button type="submit" class="button button-primary" id="vistoria-submit">Salvar vistoria</button></div>
+            </article>
+          </form>
+        </section>
+
+        <section class="page" id="page-historico" data-title="Histórico" data-subtitle="Consulte e filtre as vistorias realizadas">
+          <article class="card filter-card">
+            <div class="card-header"><div><h2>Filtros</h2><p>Combine os campos para localizar registros.</p></div><button class="button button-ghost compact" id="history-clear">Limpar filtros</button></div>
+            <div class="form-grid cols-5">
+              <label class="field"><span>Data inicial</span><input type="date" id="filter-start"></label>
+              <label class="field"><span>Data final</span><input type="date" id="filter-end"></label>
+              <label class="field"><span>Empresa</span><select id="filter-company"><option value="">Todas</option></select></label>
+              <label class="field"><span>Placa</span><input type="search" id="filter-plate" maxlength="8" placeholder="ABC1D23"></label>
+              <label class="field"><span>Resultado</span><select id="filter-result"><option value="">Todos</option><option value="APROVADO">Aprovado</option><option value="ATENÇÃO">Atenção</option></select></label>
+            </div>
+          </article>
+          <article class="card">
+            <div class="card-header"><div><h2>Vistorias</h2><p id="history-count">0 registros encontrados</p></div></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Data</th><th>Empresa</th><th>Motorista</th><th>Veículo</th><th>Placa</th><th>Fiscalizador</th><th>Resultado</th><th aria-label="Ações"></th></tr></thead>
+                <tbody id="history-table"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="page" id="page-veiculos" data-title="Veículos" data-subtitle="Cadastre e mantenha a frota atualizada">
+          <div class="management-layout">
+            <article class="card form-card">
+              <div class="card-header"><div><h2 id="vehicle-form-title">Novo veículo</h2><p>Informe os dados operacionais.</p></div></div>
+              <form id="vehicle-form" novalidate>
+                <input type="hidden" id="vehicle-id">
+                <div class="form-grid cols-2">
+                  <label class="field"><span>Placa *</span><input type="text" id="vehicle-plate" maxlength="8" placeholder="ABC1D23" required></label>
+                  <label class="field"><span>Marca *</span><input type="text" id="vehicle-brand" maxlength="60" required></label>
+                  <label class="field"><span>Modelo *</span><input type="text" id="vehicle-model" maxlength="80" required></label>
+                  <label class="field"><span>Ano *</span><input type="number" id="vehicle-year" min="1900" max="2100" required></label>
+                  <label class="field"><span>Tipo do veículo *</span><select id="vehicle-type" required><option value="">Selecione</option><option>Carro</option><option>Van</option><option>Caminhão</option><option>Utilitário</option><option>Moto</option><option>Outro</option></select></label>
+                  <label class="field"><span>Cor *</span><input type="text" id="vehicle-color" maxlength="40" required></label>
+                  <label class="field"><span>Combustível *</span><select id="vehicle-fuel" required><option value="">Selecione</option><option>Gasolina</option><option>Etanol</option><option>Flex</option><option>Diesel</option><option>Elétrico</option><option>Híbrido</option><option>Outro</option></select></label>
+                  <label class="field"><span>Quilometragem *</span><input type="number" id="vehicle-mileage" min="0" step="1" required></label>
+                  <label class="field span-2"><span>Empresa *</span><select id="vehicle-company" required><option value="">Selecione</option></select></label>
+                  <label class="field"><span>Unidade *</span><input type="text" id="vehicle-unit" maxlength="80" required></label>
+                  <label class="field"><span>Status *</span><select id="vehicle-status" required><option value="Ativo">Ativo</option><option value="Inativo">Inativo</option></select></label>
+                </div>
+                <div class="form-actions"><button type="button" class="button button-ghost" id="vehicle-cancel" hidden>Cancelar</button><button type="submit" class="button button-primary">Salvar veículo</button></div>
+              </form>
+            </article>
+            <article class="card list-card">
+              <div class="card-header"><div><h2>Veículos cadastrados</h2><p id="vehicles-count">0 veículos</p></div><label class="search-box"><svg><use href="#icon-search"></use></svg><input type="search" id="vehicle-search" placeholder="Buscar por placa ou modelo" aria-label="Buscar veículos"></label></div>
+              <div class="table-wrap"><table><thead><tr><th>Placa</th><th>Veículo</th><th>Empresa</th><th>Quilometragem</th><th>Status</th><th aria-label="Ações"></th></tr></thead><tbody id="vehicles-table"></tbody></table></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="page" id="page-motoristas" data-title="Motoristas" data-subtitle="Mantenha os condutores da operação organizados">
+          <div class="management-layout">
+            <article class="card form-card">
+              <div class="card-header"><div><h2 id="driver-form-title">Novo motorista</h2><p>Cadastre somente os dados necessários.</p></div></div>
+              <form id="driver-form" novalidate>
+                <input type="hidden" id="driver-id">
+                <div class="form-grid cols-2">
+                  <label class="field span-2"><span>Nome *</span><input type="text" id="driver-name" maxlength="120" required></label>
+                  <label class="field"><span>Matrícula *</span><input type="text" id="driver-registration" maxlength="40" required></label>
+                  <label class="field"><span>Categoria da CNH *</span><select id="driver-license-category" required><option value="">Selecione</option><option>A</option><option>B</option><option>AB</option><option>C</option><option>D</option><option>E</option><option>AC</option><option>AD</option><option>AE</option></select></label>
+                  <label class="field"><span>Validade da CNH *</span><input type="date" id="driver-license-expiry" required></label>
+                  <label class="field"><span>Empresa *</span><select id="driver-company" required><option value="">Selecione</option></select></label>
+                  <label class="field span-2"><span>Status *</span><select id="driver-status" required><option value="Ativo">Ativo</option><option value="Inativo">Inativo</option></select></label>
+                </div>
+                <div class="form-actions"><button type="button" class="button button-ghost" id="driver-cancel" hidden>Cancelar</button><button type="submit" class="button button-primary">Salvar motorista</button></div>
+              </form>
+            </article>
+            <article class="card list-card">
+              <div class="card-header"><div><h2>Motoristas cadastrados</h2><p id="drivers-count">0 motoristas</p></div><label class="search-box"><svg><use href="#icon-search"></use></svg><input type="search" id="driver-search" placeholder="Buscar nome ou matrícula" aria-label="Buscar motoristas"></label></div>
+              <div class="table-wrap"><table><thead><tr><th>Nome</th><th>Matrícula</th><th>CNH</th><th>Empresa</th><th>Status</th><th aria-label="Ações"></th></tr></thead><tbody id="drivers-table"></tbody></table></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="page" id="page-empresas" data-title="Empresas" data-subtitle="Cadastre empresas, unidades e contratos">
+          <div class="management-layout">
+            <article class="card form-card">
+              <div class="card-header"><div><h2 id="company-form-title">Nova empresa</h2><p>Informe os dados do contrato.</p></div></div>
+              <form id="company-form" novalidate>
+                <input type="hidden" id="company-id">
+                <div class="form-grid cols-2">
+                  <label class="field span-2"><span>Nome da empresa *</span><input type="text" id="company-name" maxlength="120" required></label>
+                  <label class="field"><span>CNPJ *</span><input type="text" id="company-cnpj" maxlength="18" inputmode="numeric" placeholder="00.000.000/0000-00" required></label>
+                  <label class="field"><span>Unidade *</span><input type="text" id="company-unit" maxlength="80" required></label>
+                  <label class="field span-2"><span>Projeto / Contrato *</span><input type="text" id="company-project" maxlength="120" required></label>
+                  <label class="field"><span>Responsável *</span><input type="text" id="company-manager" maxlength="120" required></label>
+                  <label class="field"><span>Status *</span><select id="company-status" required><option value="Ativo">Ativo</option><option value="Inativo">Inativo</option></select></label>
+                </div>
+                <div class="form-actions"><button type="button" class="button button-ghost" id="company-cancel" hidden>Cancelar</button><button type="submit" class="button button-primary">Salvar empresa</button></div>
+              </form>
+            </article>
+            <article class="card list-card">
+              <div class="card-header"><div><h2>Empresas cadastradas</h2><p id="companies-count">0 empresas</p></div><label class="search-box"><svg><use href="#icon-search"></use></svg><input type="search" id="company-search" placeholder="Buscar empresa ou CNPJ" aria-label="Buscar empresas"></label></div>
+              <div class="table-wrap"><table><thead><tr><th>Empresa</th><th>CNPJ</th><th>Unidade</th><th>Projeto</th><th>Status</th><th aria-label="Ações"></th></tr></thead><tbody id="companies-table"></tbody></table></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="page" id="page-exportar" data-title="Exportar Dados" data-subtitle="Prepare as vistorias para análise em Excel ou Power BI">
+          <div class="export-layout">
+            <article class="card export-hero">
+              <span class="export-icon"><svg><use href="#icon-download"></use></svg></span>
+              <div><p class="eyebrow">ARQUIVO XLSX</p><h2>Exporte o histórico completo</h2><p>O arquivo terá uma linha por vistoria, com dados de empresa, motorista, veículo e checklist organizados em colunas.</p></div>
+              <button class="button button-primary" id="export-button"><svg><use href="#icon-download"></use></svg>Gerar arquivo Excel</button>
+            </article>
+            <div class="export-info-grid">
+              <article class="card mini-info"><span id="export-count">0</span><div><strong>vistorias disponíveis</strong><p>Todos os registros atuais serão incluídos.</p></div></article>
+              <article class="card mini-info"><span>XLSX</span><div><strong>formato estruturado</strong><p>Compatível com Excel e importação no Power BI.</p></div></article>
+              <article class="card mini-info"><span>1:1</span><div><strong>uma linha por vistoria</strong><p>Checklist achatado para facilitar análises.</p></div></article>
+            </div>
+            <article class="card"><div class="card-header"><div><h2>Conteúdo do arquivo</h2><p>O nome será gerado no padrão <code>vistorias_YYYY-MM-DD.xlsx</code>.</p></div></div><div class="column-preview" id="export-columns"></div></article>
+          </div>
+        </section>
+
+        <section class="page report-page" id="page-relatorio" data-title="Relatório de Vistoria" data-subtitle="Documento completo para impressão e arquivamento">
+          <div class="report-toolbar">
+            <button type="button" class="button button-ghost" id="report-back">Voltar ao histórico</button>
+            <button type="button" class="button button-primary" id="report-print"><svg><use href="#icon-print"></use></svg>Imprimir / Salvar PDF</button>
+          </div>
+          <article class="inspection-report" id="report-document"></article>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="inspection-dialog" class="details-dialog">
+    <div class="dialog-header"><div><p class="eyebrow">DETALHES DA VISTORIA</p><h2 id="dialog-title">Vistoria</h2></div><button class="icon-button" id="dialog-close" aria-label="Fechar"><svg><use href="#icon-close"></use></svg></button></div>
+    <div id="dialog-content"></div>
+  </dialog>
+
+  <div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+  <script src="js/firebase-config.js" defer></script>
+  <script src="js/firebase-service.js" defer></script>
+  <script src="js/empresas.js" defer></script>
+  <script src="js/motoristas.js" defer></script>
+  <script src="js/veiculos.js" defer></script>
+  <script src="js/fotos.js" defer></script>
+  <script src="js/vistorias.js" defer></script>
+  <script src="js/dashboard.js" defer></script>
+  <script src="js/exportacao.js" defer></script>
+  <script src="js/relatorio.js" defer></script>
+  <script src="js/app.js" defer></script>
+</body>
+</html>
