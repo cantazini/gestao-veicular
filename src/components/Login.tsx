@@ -1,0 +1,3 @@
+import { ShieldCheck } from "lucide-react";
+import { useAuth } from "../auth/AuthContext";
+export function Login() { const { signIn, error } = useAuth(); return <main className="login-shell"><section className="login-card"><div className="login-brand"><img src="/assets/logo-meta-branca.png" alt="Meta Central de Serviços" /></div><div className="login-content"><p className="eyebrow">Gestão corporativa</p><h1>Gestão Veicular</h1><p>Vistorias, documentos e conformidade em uma única plataforma.</p>{error && <div className="alert error">{error}</div>}<button className="button primary wide" onClick={signIn}><ShieldCheck size={19}/> Entrar com conta corporativa</button><small>Acesso restrito a usuários autorizados.</small></div></section></main> }

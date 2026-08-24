@@ -1,0 +1,5 @@
+.upload-strip{display:grid;grid-template-columns:170px 150px 1fr auto;gap:10px;align-items:center;background:#f7f9fc;border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:14px}
+.upload-strip label{position:relative;overflow:hidden}
+.upload-strip label input{position:absolute;width:1px;height:1px;opacity:0}
+@media(max-width:820px){.upload-strip{grid-template-columns:1fr 1fr}.upload-strip label,.upload-strip button{width:100%}}
+@media(max-width:560px){.upload-strip{grid-template-columns:1fr}}

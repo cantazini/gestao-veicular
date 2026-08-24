@@ -1,0 +1,16 @@
+{
+  "name": "meta-gestao-veicular-migration",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "export:firestore": "node export-firestore.mjs",
+    "import:azure": "node import-azure.mjs",
+    "import:files": "node import-files.mjs"
+  },
+  "dependencies": {
+    "@azure/storage-blob": "^12.33.0",
+    "firebase-admin": "^13.5.0",
+    "mssql": "^12.7.0"
+  }
+}

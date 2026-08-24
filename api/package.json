@@ -1,0 +1,24 @@
+{
+  "name": "meta-gestao-veicular-api",
+  "version": "3.0.0",
+  "private": true,
+  "main": "dist/functions/*.js",
+  "engines": { "node": ">=22 <25" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.16.2",
+    "@azure/storage-blob": "^12.33.0",
+    "mssql": "^12.7.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/mssql": "^9.1.8",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

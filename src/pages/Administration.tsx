@@ -1,0 +1,2 @@
+import { useState } from "react"; import { EntityPage } from "./EntityPage";
+export function Administration(){const [tab,setTab]=useState<"users"|"accessProfiles">("users");return <><div className="tabs"><button className={tab==="users"?"active":""} onClick={()=>setTab("users")}>Usuários e papéis</button><button className={tab==="accessProfiles"?"active":""} onClick={()=>setTab("accessProfiles")}>Perfis de acesso</button></div><EntityPage entity={tab}/></>}

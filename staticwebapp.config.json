@@ -1,0 +1,20 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/api/*", "/.auth/*", "/assets/*", "/*.{css,js,png,jpg,jpeg,svg,ico,map}"]
+  },
+  "routes": [
+    { "route": "/login", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/assets/*", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/api/*", "allowedRoles": ["authenticated"] },
+    { "route": "/*", "allowedRoles": ["anonymous", "authenticated"] }
+  ],
+  "globalHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(self), geolocation=(), microphone=()",
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.blob.core.windows.net; connect-src 'self' https://*.blob.core.windows.net; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  },
+  "platform": { "apiRuntime": "node:22" }
+}
