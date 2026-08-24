@@ -3,7 +3,7 @@
   "version": "3.0.0",
   "private": true,
   "main": "dist/functions/*.js",
-  "engines": { "node": ">=22 <25" },
+  "engines": { "node": "22.x" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -17,7 +17,7 @@
   },
   "devDependencies": {
     "@types/mssql": "^9.1.8",
-    "@types/node": "^26.2.0",
+    "@types/node": "^22.0.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   }
