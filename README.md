@@ -254,6 +254,31 @@ Documentos aceitos: PDF, JPG, PNG, DOCX e XLSX, até 10 MB. Fotos: JPG ou PNG, a
 
 A marca Meta é global e usa a nova logo branca fornecida no login/menu. Klabin não é fixa na aplicação: é um cliente de demonstração e sua logo aparece somente porque o registro do cliente aponta para ela. Em produção, faça upload da logo de cada cliente no cadastro correspondente. O snapshot da vistoria guarda a identidade do cliente existente na data da inspeção.
 
+## Experiência da interface e autenticação
+
+A interface possui um design system leve em CSS puro, sem biblioteca visual adicional. O arquivo `src/product.css` concentra a camada mais recente de refinamento: superfícies, estados de interação, login, modal, navegação e jornada guiada de vistoria. Os estilos anteriores continuam separados para reduzir risco de regressão e facilitar a comparação durante a homologação.
+
+- o menu mantém expansão e modo compacto no navegador, abre automaticamente o grupo da rota atual e marca somente a opção correta;
+- o relatório de uma vistoria pertence ao item **Histórico**, enquanto `/vistorias/nova` pertence exclusivamente a **Nova vistoria**;
+- modais mantêm cabeçalho e ações visíveis, com rolagem apenas na área de campos, fechamento por `Esc` e adaptação para tablet/celular;
+- formulários exibem campos obrigatórios, agrupamentos, máscaras de CNPJ/telefone, ajuda contextual e múltipla seleção por caixas marcáveis;
+- a nova vistoria orienta a dependência **Empresa → Projeto → Veículo → Motorista** e explica por que uma opção ainda está bloqueada;
+- o Histórico aplica de fato os filtros de busca e resultado e oferece estados explícitos de carregamento, erro e lista vazia.
+
+O login foi redesenhado, mas o método de autenticação não mudou: o botão **Continuar com Microsoft** encaminha para `/.auth/login/aad`. Não existem campos locais de usuário ou senha porque isso faria a aplicação receber credenciais e exigiria uma nova arquitetura de identidade, recuperação de conta, MFA, proteção contra ataques e auditoria. Com o SSO, a senha permanece somente no Microsoft Entra ID.
+
+### O que é o perfil de circulação e acesso
+
+O campo exibido no veículo como **Perfil de circulação e acesso** corresponde a `dbo.access_profiles`. Ele não é decorativo:
+
+1. `dbo.vehicles.access_profile_id` é uma chave estrangeira `uniqueidentifier NOT NULL`;
+2. um perfil pode ser global (`client_id` vazio) ou específico de um cliente;
+3. o perfil reúne portarias e áreas autorizadas nas tabelas `access_profile_gates` e `access_profile_areas`;
+4. seu nome participa da análise de elegibilidade de credenciais;
+5. seus dados são copiados para o snapshot da vistoria, preservando o histórico mesmo que a configuração mude depois.
+
+Por isso, o campo continua obrigatório. Administradores gerenciam sua origem em **Administração → Perfis de circulação e acesso**. Ao cadastrar um veículo, a lista mostra perfis globais ou pertencentes ao mesmo cliente da empresa selecionada. Se não houver opção compatível, a tela apresenta uma orientação e, para administradores, um link direto para essa configuração.
+
 ## Relatórios e PDF
 
 Abra **Histórico → Relatório → Imprimir / Salvar PDF**. O navegador mostra sua janela de impressão. Escolha **Salvar como PDF**.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BarChart3, Building2, Car, ChevronDown, ClipboardCheck, FileBadge, FileClock,
   FileSpreadsheet, FileUp, FolderKanban, KeyRound, Menu, PanelLeftClose, PanelLeftOpen,
@@ -43,8 +43,15 @@ const menuGroups: MenuGroup[] = [
 
 const defaultGroups = Object.fromEntries(menuGroups.map((group) => [group.key, true]));
 
+export function isMenuItemActive(pathname: string, target: string) {
+  if (target === "/") return pathname === "/";
+  if (target === "/vistorias") return pathname === target || (/^\/vistorias\/[^/]+$/.test(pathname) && pathname !== "/vistorias/nova");
+  return pathname === target;
+}
+
 export function AppLayout() {
   const { user, signOut } = useAuth();
+  const location = useLocation();
   const [open, setOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("meta.sidebar.compact") === "true");
@@ -55,6 +62,11 @@ export function AppLayout() {
 
   useEffect(() => localStorage.setItem("meta.sidebar.compact", String(collapsed)), [collapsed]);
   useEffect(() => localStorage.setItem("meta.sidebar.groups", JSON.stringify(openGroups)), [openGroups]);
+  useEffect(() => {
+    const currentGroup = menuGroups.find((group) => group.items.some((item) => isMenuItemActive(location.pathname, item.to)));
+    if (currentGroup) setOpenGroups((current) => current[currentGroup.key] ? current : { ...current, [currentGroup.key]: true });
+    setProfileOpen(false);
+  }, [location.pathname]);
 
   const toggleGroup = (key: string) => setOpenGroups((current) => ({ ...current, [key]: !current[key] }));
 
@@ -77,11 +89,12 @@ export function AppLayout() {
             <button className="nav-group-toggle" onClick={() => toggleGroup(group.key)} aria-expanded={expanded}>
               <span>{group.label}</span><ChevronDown className={expanded ? "rotated" : ""}/>
             </button>
-            {expanded && <div className="nav-group-links">{visibleItems.map(({ to, label, icon: Icon }) =>
-              <NavLink key={to} to={to} end={to === "/"} title={collapsed ? label : undefined} onClick={() => setOpen(false)}>
+            {expanded && <div className="nav-group-links">{visibleItems.map(({ to, label, icon: Icon }) => {
+              const active = isMenuItemActive(location.pathname, to);
+              return <NavLink key={to} to={to} end title={collapsed ? label : undefined} aria-current={active ? "page" : undefined} className={active ? "active" : undefined} onClick={() => setOpen(false)}>
                 <Icon size={19}/><span>{label}</span>
-              </NavLink>
-            )}</div>}
+              </NavLink>;
+            })}</div>}
           </section>;
         })}
       </nav>

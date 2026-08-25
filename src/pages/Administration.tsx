@@ -1,2 +1,23 @@
-import { useState } from "react"; import { EntityPage } from "./EntityPage";
-export function Administration(){const [tab,setTab]=useState<"users"|"accessProfiles">("users");return <><div className="tabs"><button className={tab==="users"?"active":""} onClick={()=>setTab("users")}>Usuários e papéis</button><button className={tab==="accessProfiles"?"active":""} onClick={()=>setTab("accessProfiles")}>Perfis de acesso</button></div><EntityPage entity={tab}/></>}
+import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { EntityPage } from "./EntityPage";
+
+type AdministrationTab = "users" | "accessProfiles";
+
+export function Administration() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [tab, setTab] = useState<AdministrationTab>(requestedTab === "accessProfiles" ? "accessProfiles" : "users");
+  const selectTab = (next: AdministrationTab) => {
+    setTab(next);
+    setSearchParams(next === "users" ? {} : { tab: next }, { replace: true });
+  };
+
+  return <>
+    <div className="tabs" role="tablist" aria-label="Áreas da administração">
+      <button role="tab" aria-selected={tab === "users"} className={tab === "users" ? "active" : ""} onClick={() => selectTab("users")}>Usuários e papéis</button>
+      <button role="tab" aria-selected={tab === "accessProfiles"} className={tab === "accessProfiles" ? "active" : ""} onClick={() => selectTab("accessProfiles")}>Perfis de circulação e acesso</button>
+    </div>
+    <EntityPage entity={tab}/>
+  </>;
+}
