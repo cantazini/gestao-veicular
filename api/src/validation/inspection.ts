@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { optionalSqlGuid, sqlGuid } from "./sqlFields";
+import { optionalSqlGuid, sqlGuid, sqlTime } from "./sqlFields";
 
 export const inspectionSchema = z.object({
   companyId: sqlGuid,
@@ -7,7 +7,7 @@ export const inspectionSchema = z.object({
   driverId: sqlGuid,
   projectId: sqlGuid,
   inspectionDate: z.iso.date(),
-  inspectionTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  inspectionTime: sqlTime,
   mileage: z.number().int().nonnegative(),
   generalObservations: z.string().trim().max(4000).optional().default(""),
   items: z.array(z.object({

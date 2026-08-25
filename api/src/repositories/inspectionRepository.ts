@@ -4,11 +4,24 @@ import type { AppUser } from "../types/auth";
 import type { InspectionInput, PageResult } from "../types/domain";
 import { badRequest, conflict, notFound } from "../utils/errors";
 import { normalizePlate } from "../utils/normalize";
+import { sqlTime, toSqlLocalDateTime } from "../validation/sqlFields";
 
 interface InspectionQuery {
   page: number; pageSize: number; startDate?: string; endDate?: string; clientId?: string; companyId?: string;
   projectId?: string; vehicleId?: string; driverId?: string; plate?: string; result?: string; inspector?: string;
 }
+
+export interface InspectionPersistenceDependencies {
+  runInTransaction: typeof withTransaction;
+  createRequest: (transaction: sql.Transaction) => sql.Request;
+  createId: () => string;
+}
+
+const defaultPersistenceDependencies: InspectionPersistenceDependencies = {
+  runInTransaction: withTransaction,
+  createRequest: (transaction) => new sql.Request(transaction),
+  createId: () => crypto.randomUUID()
+};
 
 function bindOptionalFilters(request: sql.Request, filters: InspectionQuery): string[] {
   const where = ["1=1"];
@@ -89,13 +102,15 @@ export async function getInspection(id: string, user: AppUser): Promise<Record<s
   };
 }
 
-export async function createInspection(input: InspectionInput, actor: AppUser): Promise<Record<string, unknown>> {
+export async function createInspection(input: InspectionInput, actor: AppUser, dependencies: InspectionPersistenceDependencies = defaultPersistenceDependencies): Promise<Record<string, unknown>> {
   validateChecklist(input.items);
   const summary = calculateCompliance(input.items);
-  const id = crypto.randomUUID();
+  const inspectionTime = sqlTime.parse(input.inspectionTime);
+  const deviceRecordedAt = toSqlLocalDateTime(input.inspectionDate, inspectionTime);
+  const id = dependencies.createId();
 
-  return withTransaction(async (transaction) => {
-    const metadata = await new sql.Request(transaction)
+  return dependencies.runInTransaction(async (transaction) => {
+    const metadata = await dependencies.createRequest(transaction)
       .input("vehicleId", sql.UniqueIdentifier, input.vehicleId)
       .input("companyId", sql.UniqueIdentifier, input.companyId)
       .input("driverId", sql.UniqueIdentifier, input.driverId)
@@ -128,7 +143,7 @@ export async function createInspection(input: InspectionInput, actor: AppUser): 
     if (!row.driver_linked) throw badRequest("O motorista não está vinculado ao veículo selecionado.");
     if (Number(input.mileage) < Number(row.mileage || 0)) throw conflict(`A quilometragem não pode ser menor que ${row.mileage} km.`);
 
-    const settingsResult = await new sql.Request(transaction).query("SELECT minimum_inspection_compliance FROM dbo.system_settings WHERE id=1");
+    const settingsResult = await dependencies.createRequest(transaction).query("SELECT minimum_inspection_compliance FROM dbo.system_settings WHERE id=1");
     const threshold = Number(settingsResult.recordset[0]?.minimum_inspection_compliance ?? 90);
     const resultStatus = summary.percentage >= threshold ? "APROVADO" : "REPROVADO";
     const sequence = Number(row.inspection_sequence || 0) + 1;
@@ -142,13 +157,13 @@ export async function createInspection(input: InspectionInput, actor: AppUser): 
       accessProfile: { id: row.access_profile_id, name: row.access_profile_name, description: row.access_profile_description, color: row.access_profile_color }
     };
 
-    await new sql.Request(transaction)
+    await dependencies.createRequest(transaction)
       .input("id", sql.UniqueIdentifier, id).input("code", sql.NVarChar(40), code).input("sequence", sql.Int, sequence)
       .input("clientId", sql.UniqueIdentifier, row.client_id).input("companyId", sql.UniqueIdentifier, input.companyId)
       .input("projectId", sql.UniqueIdentifier, input.projectId).input("vehicleId", sql.UniqueIdentifier, input.vehicleId)
       .input("driverId", sql.UniqueIdentifier, input.driverId).input("inspectorId", sql.UniqueIdentifier, actor.id)
-      .input("inspectionDate", sql.Date, input.inspectionDate).input("inspectionTime", sql.Time, input.inspectionTime)
-      .input("deviceRecordedAt", sql.DateTime2, `${input.inspectionDate}T${input.inspectionTime}:00`)
+      .input("inspectionDate", sql.Date, input.inspectionDate).input("inspectionTime", sql.NVarChar(5), inspectionTime)
+      .input("deviceRecordedAt", sql.NVarChar(19), deviceRecordedAt)
       .input("mileage", sql.Int, input.mileage).input("compliant", sql.Int, summary.compliant)
       .input("nonCompliant", sql.Int, summary.nonCompliant).input("notApplicable", sql.Int, summary.notApplicable)
       .input("applicable", sql.Int, summary.applicable).input("percentage", sql.Decimal(5, 2), summary.percentage)
@@ -158,13 +173,14 @@ export async function createInspection(input: InspectionInput, actor: AppUser): 
       .query(`INSERT INTO dbo.inspections (id,code,vehicle_sequence,client_id,company_id,project_id,vehicle_id,driver_id,inspector_user_id,
         inspection_date,inspection_time,device_recorded_at,mileage,compliant_count,non_compliant_count,not_applicable_count,
         applicable_count,compliance_percentage,threshold_percentage,result,general_observations,snapshot_json,created_by,updated_by)
-        VALUES (@id,@code,@sequence,@clientId,@companyId,@projectId,@vehicleId,@driverId,@inspectorId,@inspectionDate,@inspectionTime,
-        @deviceRecordedAt,@mileage,@compliant,@nonCompliant,@notApplicable,@applicable,@percentage,@threshold,@result,@observations,@snapshot,@actorId,@actorId)`);
+        VALUES (@id,@code,@sequence,@clientId,@companyId,@projectId,@vehicleId,@driverId,@inspectorId,@inspectionDate,
+        CONVERT(time(0),@inspectionTime,108),CONVERT(datetime2(0),@deviceRecordedAt,126),@mileage,@compliant,@nonCompliant,
+        @notApplicable,@applicable,@percentage,@threshold,@result,@observations,@snapshot,@actorId,@actorId)`);
 
     const official = new Map<string, { key: string; label: string; categoryKey: string; categoryLabel: string; displayOrder: number }>(CHECKLIST_ITEMS.map((item, index) => [item.key, { ...item, displayOrder: index + 1 }]));
     for (const item of input.items) {
       const definition = official.get(item.key)!;
-      await new sql.Request(transaction)
+      await dependencies.createRequest(transaction)
         .input("inspectionId", sql.UniqueIdentifier, id).input("key", sql.NVarChar(80), definition.key)
         .input("categoryKey", sql.NVarChar(80), definition.categoryKey).input("categoryLabel", sql.NVarChar(100), definition.categoryLabel)
         .input("label", sql.NVarChar(200), definition.label).input("status", sql.NVarChar(30), item.status)
@@ -172,7 +188,7 @@ export async function createInspection(input: InspectionInput, actor: AppUser): 
         .query(`INSERT INTO dbo.inspection_items (inspection_id,item_key,category_key,category_label,item_label,status,observation,display_order)
                 VALUES (@inspectionId,@key,@categoryKey,@categoryLabel,@label,@status,@observation,@displayOrder)`);
     }
-    await new sql.Request(transaction).input("vehicleId", sql.UniqueIdentifier, input.vehicleId).input("sequence", sql.Int, sequence)
+    await dependencies.createRequest(transaction).input("vehicleId", sql.UniqueIdentifier, input.vehicleId).input("sequence", sql.Int, sequence)
       .input("mileage", sql.Int, input.mileage).input("actorId", sql.UniqueIdentifier, actor.id)
       .query("UPDATE dbo.vehicles SET inspection_sequence=@sequence,mileage=@mileage,updated_at=SYSUTCDATETIME(),updated_by=@actorId WHERE id=@vehicleId");
     return { id, code, vehicleSequence: sequence, result: resultStatus, compliancePercentage: summary.percentage, summary, snapshot };

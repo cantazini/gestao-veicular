@@ -19,9 +19,7 @@ export async function getPool(): Promise<ConnectionPool> {
   return poolPromise;
 }
 
-export async function withTransaction<T>(work: (transaction: Transaction) => Promise<T>): Promise<T> {
-  const pool = await getPool();
-  const transaction = new sql.Transaction(pool);
+export async function executeTransaction<T>(transaction: Transaction, work: (transaction: Transaction) => Promise<T>): Promise<T> {
   await transaction.begin(sql.ISOLATION_LEVEL.READ_COMMITTED);
   try {
     const result = await work(transaction);
@@ -31,6 +29,11 @@ export async function withTransaction<T>(work: (transaction: Transaction) => Pro
     await transaction.rollback().catch(() => undefined);
     throw error;
   }
+}
+
+export async function withTransaction<T>(work: (transaction: Transaction) => Promise<T>): Promise<T> {
+  const pool = await getPool();
+  return executeTransaction(new sql.Transaction(pool), work);
 }
 
 export { sql };
