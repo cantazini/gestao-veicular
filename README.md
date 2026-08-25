@@ -10,6 +10,8 @@ Esta pasta é independente. A V2 original não foi alterada e pode continuar ser
 - perfis internos `admin`, `inspector` e `supplier`;
 - isolamento de fornecedores por `company_id` validado pela API;
 - dashboard, clientes, projetos, empresas, motoristas, veículos, usuários e perfis de acesso;
+- cadastro de clientes com Razão Social, Nome Fantasia, máscara/validação de CNPJ e bloqueio de duplicidade;
+- vínculos progressivos entre cliente, projeto, empresa, veículo, motorista e vistoria, validados também pela API;
 - documentos privados com URLs SAS curtas;
 - checklist oficial com 39 itens, divididos em 10 + 12 + 9 + 8;
 - cálculo de conformidade e resultado repetido no servidor;
@@ -19,6 +21,7 @@ Esta pasta é independente. A V2 original não foi alterada e pode continuar ser
 - registro fotográfico com três imagens por linha na impressão;
 - credenciais veiculares individuais ou em lote;
 - exportação XLSX achatada para Excel e Power BI;
+- importação XLSX em massa com modelo, pré-visualização, validação de vínculos e confirmação;
 - scripts SQL, migração controlada e workflow de implantação.
 
 ## Arquitetura
@@ -47,7 +50,7 @@ src/                         interface React
   auth/                      sessão do usuário
   components/                layout e componentes reutilizáveis
   data/                      definição do checklist oficial
-  lib/                       API, imagens, formatação e mock local
+  lib/                       API, imagens, formatação, importação e mock local
   pages/                     telas do sistema
 api/                         Azure Functions
   src/functions/             rotas HTTP
@@ -142,7 +145,8 @@ O modo `DEV_AUTH` da API falha se o ambiente não for `Development` ou se a cham
 1. No portal Azure, confirme um administrador do servidor SQL para `sql-meta-gestao-veicular`.
 2. Conecte ao banco `sqldb-meta-gestao-veicular` usando essa conta administrativa.
 3. Execute [database/001_schema.sql](database/001_schema.sql).
-4. Crie um usuário SQL contido e exclusivo para a API, com senha forte gerada fora do repositório. Não use a conta administrativa na aplicação:
+4. Execute [database/003_clients_unique_cnpj.sql](database/003_clients_unique_cnpj.sql). A migração interrompe com uma mensagem clara se já houver CNPJs duplicados; nesse caso, saneie os registros antes de executá-la novamente.
+5. Crie um usuário SQL contido e exclusivo para a API, com senha forte gerada fora do repositório. Não use a conta administrativa na aplicação:
 
    ```sql
    CREATE USER [meta_gestao_api] WITH PASSWORD = '<SENHA_FORTE_FORA_DO_GIT>';
@@ -150,14 +154,14 @@ O modo `DEV_AUTH` da API falha se o ambiente não for `Development` ou se a cham
    ALTER ROLE db_datawriter ADD MEMBER [meta_gestao_api];
    ```
 
-5. Monte `SQL_CONNECTION_STRING` com esse usuário, apontando diretamente para o banco da aplicação:
+6. Monte `SQL_CONNECTION_STRING` com esse usuário, apontando diretamente para o banco da aplicação:
 
    ```text
    Server=tcp:sql-meta-gestao-veicular.database.windows.net,1433;Initial Catalog=sqldb-meta-gestao-veicular;Persist Security Info=False;User ID=meta_gestao_api;Password=<SENHA_REAL>;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
    ```
 
-6. Cadastre a string somente nas Application Settings do backend, conforme a seção abaixo.
-7. Crie o primeiro perfil interno usando [database/002_first_admin.template.sql](database/002_first_admin.template.sql). Substitua apenas os marcadores; o arquivo não contém credenciais.
+7. Cadastre a string somente nas Application Settings do backend, conforme a seção abaixo.
+8. Crie o primeiro perfil interno usando [database/002_first_admin.template.sql](database/002_first_admin.template.sql). Substitua apenas os marcadores; o arquivo não contém credenciais.
 
 `database/test_data.local.sql` é exclusivamente demonstrativo. Não execute em produção.
 
@@ -256,6 +260,23 @@ Abra **Histórico → Relatório → Imprimir / Salvar PDF**. O navegador mostra
 
 Os estilos incluem `@page { size: A4 }`, removem navegação/botões, evitam cortes nos cards e criam uma página separada para o registro fotográfico.
 
+## Importação de cadastros por XLSX
+
+A importação está disponível para administradores em **Administração → Importar dados**.
+
+1. clique em **Baixar modelo XLSX**;
+2. mantenha os nomes das abas e dos cabeçalhos;
+3. preencha as abas na ordem lógica indicada em `Instrucoes`;
+4. use datas no formato `AAAA-MM-DD` e separe listas por ponto e vírgula;
+5. selecione a planilha e clique em **Analisar planilha**;
+6. confira a pré-visualização. Esta etapa não grava nenhum registro;
+7. corrija as linhas marcadas como pendentes ou confirme a importação das linhas válidas;
+8. confira o resultado individual de cada linha.
+
+O arquivo pode conter Clientes, Projetos, Empresas, Perfis de Acesso, Motoristas e Veículos. As referências usam CNPJ, código, nome do perfil e matrícula para localizar os IDs corretos. Durante a gravação, a tela chama os mesmos endpoints dos cadastros individuais; portanto, permissões, validações, duplicidades e vínculos continuam sendo conferidos pela API. Uma falha em uma linha é exibida sem ocultar o resultado das demais.
+
+O limite atual do arquivo é 10 MB. O modelo não contém credenciais nem dados fictícios permanentes.
+
 ## Testes e verificação
 
 ```bash
@@ -264,7 +285,7 @@ pnpm test:all
 pnpm build:all
 ```
 
-Testes atuais cobrem autenticação, decodificação segura do principal, checklist oficial, cálculo de conformidade, estrutura das categorias e interpretação segura da connection string do Blob.
+Testes atuais cobrem autenticação, decodificação segura do principal, checklist oficial, cálculo de conformidade, estrutura das categorias, interpretação segura da connection string do Blob, CRUD/duplicidade de clientes, dependências dos cadastros e validação da importação XLSX.
 
 Checklist manual recomendado:
 
@@ -277,7 +298,10 @@ Checklist manual recomendado:
 7. abrir relatório e conferir snapshots, checklist e fotos;
 8. usar a visualização de impressão A4 e salvar PDF;
 9. exportar XLSX e abrir no Excel/Power BI;
-10. verificar o console do navegador e logs da Function.
+10. baixar o modelo de importação, analisar uma planilha com linhas válidas e inválidas e confirmar somente as válidas;
+11. navegar repetidamente entre Dashboard, Clientes, Empresas, Veículos e Vistorias sem recarregar a página;
+12. recolher/expandir o menu e testar a gaveta em largura de tablet;
+13. verificar o console do navegador e logs da Function.
 
 ## Migração da V2
 
@@ -291,6 +315,8 @@ Leia [MIGRATION_FIREBASE_TO_AZURE.md](MIGRATION_FIREBASE_TO_AZURE.md) antes de m
 - aplicar regras de rede compatíveis com o plano do Static Web Apps;
 - executar teste de restauração antes do corte definitivo;
 - remover o acesso à V2 somente após aceite formal e período de contingência.
+
+A possibilidade de login próprio por usuário e senha foi analisada, mas **não foi implementada nesta versão**. O Entra ID e todas as proteções atuais permanecem inalterados. A arquitetura de sessão HttpOnly, controles de senha, fases de homologação e rollback estão documentados em [docs/AUTH_MIGRATION_PROPOSAL.md](docs/AUTH_MIGRATION_PROPOSAL.md). Qualquer implementação futura deverá começar em modo híbrido e somente substituir o Entra após testes e aceite específicos.
 
 Managed Identity pode substituir essas credenciais futuramente se a API migrar para uma **Function App dedicada** e for integrada ao Static Web Apps em um plano compatível com backend próprio. Até essa mudança arquitetural, não ative nem conceda identidade do Static Web App para acesso a SQL ou Blob.
 

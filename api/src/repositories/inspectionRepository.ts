@@ -116,13 +116,15 @@ export async function createInspection(input: InspectionInput, actor: AppUser): 
         JOIN dbo.companies co ON co.id=v.company_id
         JOIN dbo.clients c ON c.id=co.client_id
         JOIN dbo.projects p ON p.id=v.project_id
+        JOIN dbo.company_projects cp ON cp.company_id=co.id AND cp.project_id=p.id
         JOIN dbo.drivers d ON d.id=@driverId AND d.company_id=co.id
         JOIN dbo.access_profiles ap ON ap.id=v.access_profile_id
         LEFT JOIN dbo.vehicle_drivers vd ON vd.vehicle_id=v.id AND vd.driver_id=d.id
         WHERE v.id=@vehicleId AND v.company_id=@companyId AND v.project_id=@projectId
+          AND v.active=1 AND co.active=1 AND c.active=1 AND p.active=1 AND d.active=1 AND ap.active=1
       `);
     const row = metadata.recordset[0];
-    if (!row) throw notFound("Veículo, empresa, motorista ou projeto não encontrado.");
+    if (!row) throw notFound("Selecione vínculos ativos e válidos entre empresa, projeto, veículo e motorista.");
     if (!row.driver_linked) throw badRequest("O motorista não está vinculado ao veículo selecionado.");
     if (Number(input.mileage) < Number(row.mileage || 0)) throw conflict(`A quilometragem não pode ser menor que ${row.mileage} km.`);
 

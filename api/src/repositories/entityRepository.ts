@@ -5,7 +5,118 @@ import type { PageResult } from "../types/domain";
 import type { EntityName } from "../validation/entities";
 import { entityDefinitions, type EntityDefinition, type SqlFieldType } from "./entityDefinitions";
 import { digits, normalizePlate } from "../utils/normalize";
-import { notFound } from "../utils/errors";
+import { badRequest, conflict, notFound } from "../utils/errors";
+
+const hasOwn = (value: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(value, key);
+
+function sqlErrorNumber(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const candidate = error as { number?: unknown; originalError?: { info?: { number?: unknown } } };
+  return Number(candidate.number || candidate.originalError?.info?.number) || undefined;
+}
+
+function duplicateEntityError(entity: EntityName): never {
+  if (entity === "clients") throw conflict("Já existe um cliente cadastrado com este CNPJ.");
+  if (entity === "companies") throw conflict("Já existe uma empresa cadastrada com este CNPJ.");
+  if (entity === "vehicles") throw conflict("Já existe um veículo cadastrado com esta placa.");
+  if (entity === "drivers") throw conflict("Já existe um motorista com esta matrícula na empresa.");
+  throw conflict("Já existe um registro com os mesmos dados únicos.");
+}
+
+async function assertUniqueClientDocument(documentNormalized: string, excludeId?: string): Promise<void> {
+  const pool = await getPool();
+  const request = pool.request().input("documentNormalized", sql.NVarChar(30), documentNormalized);
+  if (excludeId) request.input("excludeId", sql.UniqueIdentifier, excludeId);
+  const result = await request.query(`SELECT TOP 1 id FROM dbo.clients WHERE document_normalized=@documentNormalized${excludeId ? " AND id<>@excludeId" : ""}`);
+  if (result.recordset.length) throw conflict("Já existe um cliente cadastrado com este CNPJ.");
+}
+
+async function getActiveReference(table: string, id: string): Promise<Record<string, unknown> | undefined> {
+  const pool = await getPool();
+  const result = await pool.request().input("id", sql.UniqueIdentifier, id)
+    .query(`SELECT TOP 1 * FROM ${table} WHERE id=@id AND active=1`);
+  return result.recordset[0];
+}
+
+async function assertAllReferences(
+  table: string,
+  ids: string[],
+  extraWhere: string,
+  bindExtra: (request: Request) => void,
+  message: string
+): Promise<void> {
+  if (!ids.length) return;
+  const pool = await getPool();
+  const request = pool.request();
+  ids.forEach((id, index) => request.input(`reference${index}`, sql.UniqueIdentifier, id));
+  bindExtra(request);
+  const parameters = ids.map((_, index) => `@reference${index}`).join(",");
+  const result = await request.query(`SELECT COUNT(DISTINCT id) AS total FROM ${table} WHERE id IN (${parameters}) AND active=1 ${extraWhere}`);
+  if (Number(result.recordset[0]?.total || 0) !== new Set(ids).size) throw badRequest(message);
+}
+
+async function validateEntityRelationships(entity: EntityName, payload: Record<string, unknown>): Promise<void> {
+  if (entity === "projects" || entity === "companies") {
+    const client = await getActiveReference("dbo.clients", String(payload.clientId || ""));
+    if (!client) throw badRequest("Selecione um cliente ativo e válido.");
+  }
+
+  if (entity === "companies") {
+    const clientId = String(payload.clientId);
+    const projectIds = (payload.projectIds as string[] | undefined) || [];
+    await assertAllReferences(
+      "dbo.projects",
+      projectIds,
+      "AND client_id=@clientId",
+      (request) => { request.input("clientId", sql.UniqueIdentifier, clientId); },
+      "Todos os projetos selecionados devem estar ativos e pertencer ao cliente da empresa."
+    );
+    if (payload.parentCompanyId) {
+      const pool = await getPool();
+      const parent = await pool.request()
+        .input("id", sql.UniqueIdentifier, payload.parentCompanyId)
+        .input("clientId", sql.UniqueIdentifier, clientId)
+        .query("SELECT TOP 1 id FROM dbo.companies WHERE id=@id AND client_id=@clientId AND active=1");
+      if (!parent.recordset.length) throw badRequest("A empresa matriz deve estar ativa e pertencer ao mesmo cliente.");
+    }
+  }
+
+  if (entity === "drivers" || entity === "vehicles") {
+    const company = await getActiveReference("dbo.companies", String(payload.companyId || ""));
+    if (!company) throw badRequest("Selecione uma empresa ativa e válida.");
+
+    if (entity === "vehicles") {
+      const companyId = String(payload.companyId);
+      const clientId = String(company.client_id);
+      const pool = await getPool();
+      const project = await pool.request()
+        .input("projectId", sql.UniqueIdentifier, payload.projectId)
+        .input("companyId", sql.UniqueIdentifier, companyId)
+        .input("clientId", sql.UniqueIdentifier, clientId)
+        .query(`SELECT TOP 1 p.id FROM dbo.projects p
+                INNER JOIN dbo.company_projects cp ON cp.project_id=p.id AND cp.company_id=@companyId
+                WHERE p.id=@projectId AND p.client_id=@clientId AND p.active=1`);
+      if (!project.recordset.length) throw badRequest("O projeto deve estar ativo e vinculado à empresa selecionada.");
+
+      if (payload.accessProfileId) {
+        const profile = await pool.request()
+          .input("id", sql.UniqueIdentifier, payload.accessProfileId)
+          .input("clientId", sql.UniqueIdentifier, clientId)
+          .query("SELECT TOP 1 id FROM dbo.access_profiles WHERE id=@id AND active=1 AND (client_id IS NULL OR client_id=@clientId)");
+        if (!profile.recordset.length) throw badRequest("O perfil de acesso selecionado não está disponível para este cliente.");
+      }
+
+      const driverIds = (payload.driverIds as string[] | undefined) || [];
+      await assertAllReferences(
+        "dbo.drivers",
+        driverIds,
+        "AND company_id=@companyId",
+        (request) => { request.input("companyId", sql.UniqueIdentifier, companyId); },
+        "Todos os motoristas selecionados devem estar ativos e pertencer à empresa do veículo."
+      );
+    }
+  }
+}
 
 function bind(request: Request, name: string, type: SqlFieldType, value: unknown): void {
   const safe = value === "" || value === undefined ? null : value;
@@ -33,9 +144,9 @@ function scopeClause(definition: EntityDefinition, user: AppUser): string {
 
 function normalizePayload(entity: EntityName, payload: Record<string, unknown>): Record<string, unknown> {
   const result = { ...payload };
-  if (entity === "companies" || entity === "clients") result.documentNormalized = digits(String(payload.document || ""));
-  if (entity === "vehicles") result.plateNormalized = normalizePlate(String(payload.plate || ""));
-  if (entity === "drivers") result.registrationNormalized = String(payload.registration || "").trim().toUpperCase();
+  if ((entity === "companies" || entity === "clients") && hasOwn(payload, "document")) result.documentNormalized = digits(String(payload.document || ""));
+  if (entity === "vehicles" && hasOwn(payload, "plate")) result.plateNormalized = normalizePlate(String(payload.plate || ""));
+  if (entity === "drivers" && hasOwn(payload, "registration")) result.registrationNormalized = String(payload.registration || "").trim().toUpperCase();
   return result;
 }
 
@@ -72,6 +183,20 @@ export async function listEntities(entity: EntityName, user: AppUser, query: URL
   `);
   const total = Number(result.recordset[0]?._total || 0);
   const items = result.recordset.map((row) => { const { _total, ...item } = row; return item; });
+  if (items.length && (entity === "companies" || entity === "vehicles")) {
+    const relationshipRequest = pool.request();
+    items.forEach((item, index) => relationshipRequest.input(`id${index}`, sql.UniqueIdentifier, item.id));
+    const ids = items.map((_, index) => `@id${index}`).join(",");
+    const relationshipResult = entity === "companies"
+      ? await relationshipRequest.query(`SELECT company_id AS ownerId, project_id AS relatedId FROM dbo.company_projects WHERE company_id IN (${ids})`)
+      : await relationshipRequest.query(`SELECT vehicle_id AS ownerId, driver_id AS relatedId FROM dbo.vehicle_drivers WHERE vehicle_id IN (${ids})`);
+    const relations = new Map<string, string[]>();
+    relationshipResult.recordset.forEach((row) => {
+      const ownerId = String(row.ownerId);
+      relations.set(ownerId, [...(relations.get(ownerId) || []), String(row.relatedId)]);
+    });
+    items.forEach((item) => { item[entity === "companies" ? "projectIds" : "driverIds"] = relations.get(String(item.id)) || []; });
+  }
   return { items, page, pageSize, total };
 }
 
@@ -134,6 +259,8 @@ async function writeRelationships(entity: EntityName, id: string, payload: Recor
 export async function createEntity(entity: EntityName, payloadInput: Record<string, unknown>, actor: AppUser): Promise<Record<string, unknown>> {
   const definition = entityDefinitions[entity];
   const payload = normalizePayload(entity, payloadInput);
+  if (entity === "clients") await assertUniqueClientDocument(String(payload.documentNormalized));
+  await validateEntityRelationships(entity, payload);
   const writable = Object.entries(definition.fields).filter(([api, field]) => field.writable && Object.prototype.hasOwnProperty.call(payload, api));
   const pool = await getPool();
   const request = pool.request().input("actorId", sql.UniqueIdentifier, actor.id);
@@ -145,7 +272,13 @@ export async function createEntity(entity: EntityName, payloadInput: Record<stri
   const extraValues = extraColumns.map((column) => `@${column === "document_normalized" ? "documentNormalized" : column === "plate_normalized" ? "plateNormalized" : "registrationNormalized"}`);
   const columns = [...writable.map(([, field]) => field.column), ...extraColumns, "created_by", "updated_by"];
   const values = [...writable.map(([api]) => `@${api}`), ...extraValues, "@actorId", "@actorId"];
-  const result = await request.query(`INSERT INTO ${definition.table} (${columns.join(",")}) OUTPUT INSERTED.id VALUES (${values.join(",")})`);
+  let result;
+  try {
+    result = await request.query(`INSERT INTO ${definition.table} (${columns.join(",")}) OUTPUT INSERTED.id VALUES (${values.join(",")})`);
+  } catch (error) {
+    if ([2601, 2627].includes(sqlErrorNumber(error) || 0)) duplicateEntityError(entity);
+    throw error;
+  }
   const id = String(result.recordset[0].id);
   await writeRelationships(entity, id, payload, actor.id);
   return (await getEntity(entity, id, actor)) || { id };
@@ -154,18 +287,29 @@ export async function createEntity(entity: EntityName, payloadInput: Record<stri
 export async function updateEntity(entity: EntityName, id: string, payloadInput: Record<string, unknown>, actor: AppUser): Promise<Record<string, unknown>> {
   const definition = entityDefinitions[entity];
   const payload = normalizePayload(entity, payloadInput);
+  const current = await getEntity(entity, id, actor);
+  if (!current) throw notFound();
+  const completePayload = { ...current, ...payload };
+  if (entity === "clients" && hasOwn(payload, "documentNormalized")) await assertUniqueClientDocument(String(payload.documentNormalized), id);
+  await validateEntityRelationships(entity, completePayload);
   const writable = Object.entries(definition.fields).filter(([api, field]) => field.writable && Object.prototype.hasOwnProperty.call(payload, api));
   const pool = await getPool();
   const request = pool.request().input("id", sql.UniqueIdentifier, id).input("actorId", sql.UniqueIdentifier, actor.id);
   if (actor.companyId) request.input("scopeCompanyId", sql.UniqueIdentifier, actor.companyId);
   writable.forEach(([api, field]) => bind(request, api, field.type, payload[api]));
   const sets = writable.map(([api, field]) => `${field.column}=@${api}`);
-  if (entity === "companies" || entity === "clients") { request.input("documentNormalized", sql.NVarChar(30), payload.documentNormalized); sets.push("document_normalized=@documentNormalized"); }
-  if (entity === "vehicles") { request.input("plateNormalized", sql.NVarChar(10), payload.plateNormalized); sets.push("plate_normalized=@plateNormalized"); }
-  if (entity === "drivers") { request.input("registrationNormalized", sql.NVarChar(80), payload.registrationNormalized); sets.push("registration_normalized=@registrationNormalized"); }
-  const result = await request.query(`UPDATE ${definition.table} SET ${sets.join(",")}, updated_at=SYSUTCDATETIME(), updated_by=@actorId WHERE id=@id AND ${scopeClause(definition, actor)}; SELECT @@ROWCOUNT AS affected`);
+  if ((entity === "companies" || entity === "clients") && hasOwn(payload, "documentNormalized")) { request.input("documentNormalized", sql.NVarChar(30), payload.documentNormalized); sets.push("document_normalized=@documentNormalized"); }
+  if (entity === "vehicles" && hasOwn(payload, "plateNormalized")) { request.input("plateNormalized", sql.NVarChar(10), payload.plateNormalized); sets.push("plate_normalized=@plateNormalized"); }
+  if (entity === "drivers" && hasOwn(payload, "registrationNormalized")) { request.input("registrationNormalized", sql.NVarChar(80), payload.registrationNormalized); sets.push("registration_normalized=@registrationNormalized"); }
+  let result;
+  try {
+    result = await request.query(`UPDATE ${definition.table} SET ${sets.join(",")}, updated_at=SYSUTCDATETIME(), updated_by=@actorId WHERE id=@id AND ${scopeClause(definition, actor)}; SELECT @@ROWCOUNT AS affected`);
+  } catch (error) {
+    if ([2601, 2627].includes(sqlErrorNumber(error) || 0)) duplicateEntityError(entity);
+    throw error;
+  }
   if (!Number(result.recordset[0]?.affected)) throw notFound();
-  await writeRelationships(entity, id, payload, actor.id);
+  await writeRelationships(entity, id, completePayload, actor.id);
   return (await getEntity(entity, id, actor)) || { id };
 }
 

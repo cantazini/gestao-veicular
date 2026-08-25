@@ -14,7 +14,7 @@ export function withApi(handler: ApiHandler, roles?: readonly UserRole[]) {
       return await handler(request, context, auth);
     } catch (error) {
       if (error instanceof ZodError) {
-        return json({ error: { code: "validation_error", message: "Revise os dados informados.", fields: error.flatten() } }, 400);
+        return json({ error: { code: "validation_error", message: error.issues[0]?.message || "Revise os dados informados.", fields: error.flatten() } }, 400);
       }
       if (error instanceof AppError) {
         return json({ error: { code: error.code, message: error.message, details: error.details } }, error.status);

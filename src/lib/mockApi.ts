@@ -1,5 +1,6 @@
 import { newChecklist } from "../data/checklist";
 import type { DashboardData, Entity, Inspection, PageResult, User } from "../types";
+import { onlyDigits } from "./format";
 
 const ids = { client: "00000000-0000-4000-8000-000000000010", project: "00000000-0000-4000-8000-000000000020", company: "00000000-0000-4000-8000-000000000030", profile: "00000000-0000-4000-8000-000000000040", driver: "00000000-0000-4000-8000-000000000050", vehicle: "00000000-0000-4000-8000-000000000060", inspection: "00000000-0000-4000-8000-000000000070" };
 const entities: Record<string, Entity[]> = {
@@ -18,6 +19,19 @@ let inspections: Inspection[] = [{ id: ids.inspection, code: "VIST-ABC1D23-012",
 export const mockUser: User = { id: "00000000-0000-4000-8000-000000000001", name: "Administrador local", email: "admin@local.test", role: "admin" };
 
 function page<T>(items: T[]): PageResult<T> { return { items, page: 1, pageSize: 100, total: items.length }; }
+function assertMockRelationships(entity:string,body:Entity):void{
+  if(["projects","companies"].includes(entity)&&!entities.clients.some(item=>item.id===body.clientId&&item.active))throw new Error("Selecione um cliente ativo e válido.");
+  if(["drivers","vehicles"].includes(entity)&&!entities.companies.some(item=>item.id===body.companyId&&item.active))throw new Error("Selecione uma empresa ativa e válida.");
+  if(entity==="companies"){
+    const projectIds=(body.projectIds as string[]||[]);
+    if(projectIds.some(id=>!entities.projects.some(project=>project.id===id&&project.clientId===body.clientId&&project.active)))throw new Error("Todos os projetos selecionados devem estar ativos e pertencer ao cliente da empresa.");
+  }
+  if(entity==="vehicles"){
+    const company=entities.companies.find(item=>item.id===body.companyId);
+    if(!entities.projects.some(project=>project.id===body.projectId&&project.clientId===company?.clientId&&project.active)||(company?.projectIds as string[]||[]).includes(String(body.projectId))===false)throw new Error("O projeto deve estar ativo e vinculado à empresa selecionada.");
+    if((body.driverIds as string[]||[]).some(id=>!entities.drivers.some(driver=>driver.id===id&&driver.companyId===body.companyId&&driver.active)))throw new Error("Todos os motoristas selecionados devem pertencer à empresa do veículo.");
+  }
+}
 export async function mockRequest<T>(path: string, init?: RequestInit): Promise<T> {
   await new Promise((resolve) => setTimeout(resolve, 80));
   const [pathname, queryString] = path.split("?");
@@ -39,8 +53,8 @@ export async function mockRequest<T>(path: string, init?: RequestInit): Promise<
   if (entities[entity]) {
     if (!init?.method || init.method === "GET") return (id ? entities[entity].find((item) => item.id === id) : page(entities[entity])) as T;
     const body = JSON.parse(String(init.body || "{}"));
-    if (init.method === "POST") { const created = { id: crypto.randomUUID(), ...body }; entities[entity].push(created); return created as T; }
-    if (init.method === "PUT") { const index = entities[entity].findIndex((item) => item.id === id); entities[entity][index] = { ...entities[entity][index], ...body }; return entities[entity][index] as T; }
+    if (init.method === "POST") { if(entity==="clients"&&entities.clients.some(item=>onlyDigits(item.document)===onlyDigits(body.document)))throw new Error("Já existe um cliente cadastrado com este CNPJ.");assertMockRelationships(entity,body);const created = { id: crypto.randomUUID(), ...body }; entities[entity].push(created); return created as T; }
+    if (init.method === "PUT") { const index = entities[entity].findIndex((item) => item.id === id);const updated={...entities[entity][index],...body};assertMockRelationships(entity,updated);entities[entity][index] = updated; return entities[entity][index] as T; }
   }
   if (queryString) void queryString;
   throw new Error("Rota de demonstração não implementada.");

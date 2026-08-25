@@ -1,16 +1,21 @@
 import { z } from "zod";
+import { digits, isValidCnpj } from "../utils/normalize";
 
 const id = z.string().uuid();
 const optionalId = z.union([id, z.literal(""), z.null()]).optional();
 const date = z.union([z.iso.date(), z.literal(""), z.null()]).optional();
 const active = z.boolean().default(true);
+const cnpj = z.string().trim()
+  .transform((value) => digits(value))
+  .refine((value) => value.length === 14, "Informe um CNPJ com 14 dígitos.")
+  .refine(isValidCnpj, "Informe um CNPJ válido.");
 
 export const entitySchemas = {
   clients: z.object({
     name: z.string().trim().min(2).max(140),
-    legalName: z.string().trim().max(180).optional().default(""),
-    document: z.string().trim().max(30).optional().default(""),
-    logoBlobPath: z.string().trim().max(500).optional().default(""),
+    legalName: z.string().trim().min(2).max(180),
+    document: cnpj,
+    logoBlobPath: z.string().trim().max(700).optional().default(""),
     active
   }),
   projects: z.object({

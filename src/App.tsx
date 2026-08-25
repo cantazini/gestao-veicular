@@ -13,6 +13,7 @@ import { Credentials } from "./pages/Credentials";
 import { ExportData } from "./pages/ExportData";
 import { Administration } from "./pages/Administration";
 import { SettingsPage } from "./pages/SettingsPage";
+import { ImportData } from "./pages/ImportData";
 
 function Admin({ children }: { children: ReactNode }) { const { user } = useAuth(); return user?.role === "admin" ? children : <Navigate to="/" replace/>; }
 function Inspector({ children }: { children: ReactNode }) { const { user } = useAuth(); return user && ["admin", "inspector"].includes(user.role) ? children : <Navigate to="/" replace/>; }
@@ -36,6 +37,7 @@ export default function App() {
     <Route path="credenciais" element={<Credentials/>}/>
     <Route path="exportar" element={<ExportData/>}/>
     <Route path="administracao" element={<Admin><Administration/></Admin>}/>
+    <Route path="importar" element={<Admin><ImportData/></Admin>}/>
     <Route path="configuracoes" element={<Admin><SettingsPage/></Admin>}/>
     <Route path="*" element={<Navigate to="/" replace/>}/>
   </Route></Routes>;
