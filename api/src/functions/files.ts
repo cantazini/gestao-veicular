@@ -1,9 +1,9 @@
 import { app } from "@azure/functions";
-import { z } from "zod";
 import { withApi } from "../middleware/withApi";
 import { assertFileEntityAccess, deleteFileMetadata, findFile, getClientLogoPath, saveFileMetadata } from "../repositories/fileRepository";
 import { createBlobPath, createDownloadUrl, createUploadUrl, deleteBlob, expectedPrefix, validateFile } from "../services/storage";
 import { completeUploadSchema, uploadRequestSchema } from "../validation/files";
+import { sqlGuid } from "../validation/sqlFields";
 import { badRequest, forbidden, notFound } from "../utils/errors";
 import { json, noContent } from "../utils/response";
 
@@ -33,7 +33,7 @@ app.http("fileComplete", {
 app.http("fileById", {
   methods: ["GET", "DELETE"], authLevel: "anonymous", route: "files/{id}",
   handler: withApi(async (request, _context, auth) => {
-    const id = z.string().uuid().parse(request.params.id);
+    const id = sqlGuid.parse(request.params.id);
     const record = await findFile(id);
     if (!record) throw notFound("Arquivo não encontrado.");
     await assertFileEntityAccess(record.kind, record.entityId, auth.user, request.method === "DELETE");
@@ -51,7 +51,7 @@ app.http("fileById", {
 app.http("clientLogo", {
   methods: ["GET"], authLevel: "anonymous", route: "clients/{id}/logo",
   handler: withApi(async (request, _context, auth) => {
-    const id = z.string().uuid().parse(request.params.id);
+    const id = sqlGuid.parse(request.params.id);
     const path = await getClientLogoPath(id, auth.user);
     if (!path) throw notFound("Este cliente não possui logotipo cadastrado.");
     return { status: 302, headers: { Location: await createDownloadUrl(path), "Cache-Control": "private, no-store" } };

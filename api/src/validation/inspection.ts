@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { optionalSqlGuid, sqlGuid } from "./sqlFields";
 
 export const inspectionSchema = z.object({
-  companyId: z.string().uuid(),
-  vehicleId: z.string().uuid(),
-  driverId: z.string().uuid(),
-  projectId: z.string().uuid(),
+  companyId: sqlGuid,
+  vehicleId: sqlGuid,
+  driverId: sqlGuid,
+  projectId: sqlGuid,
   inspectionDate: z.iso.date(),
   inspectionTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   mileage: z.number().int().nonnegative(),
@@ -24,11 +25,11 @@ export const inspectionQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
   startDate: z.iso.date().optional(),
   endDate: z.iso.date().optional(),
-  clientId: z.string().uuid().optional(),
-  companyId: z.string().uuid().optional(),
-  projectId: z.string().uuid().optional(),
-  vehicleId: z.string().uuid().optional(),
-  driverId: z.string().uuid().optional(),
+  clientId: optionalSqlGuid,
+  companyId: optionalSqlGuid,
+  projectId: optionalSqlGuid,
+  vehicleId: optionalSqlGuid,
+  driverId: optionalSqlGuid,
   plate: z.string().max(12).optional(),
   result: z.enum(["APROVADO", "REPROVADO"]).optional(),
   inspector: z.string().max(160).optional()

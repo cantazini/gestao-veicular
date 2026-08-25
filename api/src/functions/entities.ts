@@ -1,20 +1,18 @@
 import { app } from "@azure/functions";
-import { z } from "zod";
 import { withApi } from "../middleware/withApi";
 import { assertCompanyScope, assertRoles } from "../middleware/auth";
 import { createEntity, deactivateEntity, getEntity, listEntities, updateEntity } from "../repositories/entityRepository";
 import { entityDefinitions } from "../repositories/entityDefinitions";
-import { entitySchemas, type EntityName } from "../validation/entities";
+import { entitySchemas, entityUpdateSchemas, type EntityName } from "../validation/entities";
+import { sqlGuid } from "../validation/sqlFields";
 import { badRequest, forbidden, notFound } from "../utils/errors";
 import { json, noContent } from "../utils/response";
-
-const idSchema = z.string().uuid();
 
 function handlerFor(entity: EntityName) {
   const definition = entityDefinitions[entity];
   return withApi(async (request, _context, auth) => {
     const idValue = request.params.id;
-    const id = idValue ? idSchema.parse(idValue) : "";
+    const id = idValue ? sqlGuid.parse(idValue) : "";
     const method = request.method.toUpperCase();
     if (method === "GET") {
       assertRoles(auth.user, definition.readRoles);
@@ -30,7 +28,7 @@ function handlerFor(entity: EntityName) {
       return noContent();
     }
     const body = await request.json() as unknown;
-    const schema = method === "POST" ? entitySchemas[entity] : entitySchemas[entity].partial();
+    const schema = method === "POST" ? entitySchemas[entity] : entityUpdateSchemas[entity];
     const payload = schema.parse(body) as Record<string, unknown>;
     if (auth.user.role === "supplier") {
       const companyId = String(payload.companyId || auth.user.companyId || "");

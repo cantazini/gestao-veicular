@@ -1,9 +1,9 @@
 import { app } from "@azure/functions";
-import { z } from "zod";
 import { withApi } from "../middleware/withApi";
 import { assertRoles } from "../middleware/auth";
 import { createInspection, getInspection, listInspections } from "../repositories/inspectionRepository";
 import { inspectionQuerySchema, inspectionSchema } from "../validation/inspection";
+import { sqlGuid } from "../validation/sqlFields";
 import { badRequest, notFound } from "../utils/errors";
 import { json } from "../utils/response";
 
@@ -15,7 +15,7 @@ app.http("inspections", {
     const id = request.params.id;
     if (request.method === "GET") {
       if (id) {
-        const inspection = await getInspection(z.string().uuid().parse(id), auth.user);
+        const inspection = await getInspection(sqlGuid.parse(id), auth.user);
         if (!inspection) throw notFound("Vistoria não encontrada.");
         return json(inspection);
       }

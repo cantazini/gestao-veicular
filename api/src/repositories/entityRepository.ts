@@ -63,6 +63,8 @@ async function validateEntityRelationships(entity: EntityName, payload: Record<s
 
   if (entity === "companies") {
     const clientId = String(payload.clientId);
+    if (payload.contractType === "subcontractor" && !payload.parentCompanyId) throw badRequest("Informe a empresa contratante.");
+    if (payload.contractStart && payload.contractEnd && String(payload.contractEnd) < String(payload.contractStart)) throw badRequest("A data final deve ser posterior à inicial.");
     const projectIds = (payload.projectIds as string[] | undefined) || [];
     await assertAllReferences(
       "dbo.projects",

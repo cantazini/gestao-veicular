@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { digits, isValidCnpj } from "../utils/normalize";
+import { optionalSqlDate, optionalSqlGuid, sqlGuid } from "./sqlFields";
 
-const id = z.string().uuid();
-const optionalId = z.union([id, z.literal(""), z.null()]).optional();
-const date = z.union([z.iso.date(), z.literal(""), z.null()]).optional();
 const active = z.boolean().default(true);
 const cnpj = z.string().trim()
   .transform((value) => digits(value))
@@ -19,14 +17,14 @@ export const entitySchemas = {
     active
   }),
   projects: z.object({
-    clientId: id,
+    clientId: sqlGuid,
     name: z.string().trim().min(2).max(140),
     code: z.string().trim().min(1).max(40),
     active
   }),
   companies: z.object({
-    clientId: id,
-    parentCompanyId: optionalId,
+    clientId: sqlGuid,
+    parentCompanyId: optionalSqlGuid,
     legalName: z.string().trim().min(2).max(180),
     tradeName: z.string().trim().max(160).optional().default(""),
     document: z.string().trim().min(14).max(18),
@@ -36,16 +34,16 @@ export const entitySchemas = {
     email: z.union([z.email(), z.literal("")]).optional().default(""),
     contractNumber: z.string().trim().max(80).optional().default(""),
     contractType: z.enum(["direct", "subcontractor"]),
-    contractStart: date,
-    contractEnd: date,
-    projectIds: z.array(id).default([]),
+    contractStart: optionalSqlDate,
+    contractEnd: optionalSqlDate,
+    projectIds: z.array(sqlGuid).default([]),
     active
   }).superRefine((value, context) => {
     if (value.contractType === "subcontractor" && !value.parentCompanyId) context.addIssue({ code: "custom", path: ["parentCompanyId"], message: "Informe a empresa contratante." });
     if (value.contractStart && value.contractEnd && value.contractEnd < value.contractStart) context.addIssue({ code: "custom", path: ["contractEnd"], message: "A data final deve ser posterior à inicial." });
   }),
   drivers: z.object({
-    companyId: id,
+    companyId: sqlGuid,
     name: z.string().trim().min(2).max(160),
     registration: z.string().trim().min(1).max(60),
     jobTitle: z.string().trim().max(100).optional().default(""),
@@ -56,9 +54,9 @@ export const entitySchemas = {
     active
   }),
   vehicles: z.object({
-    companyId: id,
-    projectId: id,
-    accessProfileId: id,
+    companyId: sqlGuid,
+    projectId: sqlGuid,
+    accessProfileId: sqlGuid,
     plate: z.string().trim().min(7).max(8),
     brand: z.string().trim().min(1).max(80),
     model: z.string().trim().min(1).max(100),
@@ -69,11 +67,11 @@ export const entitySchemas = {
     mileage: z.number().int().nonnegative(),
     ownership: z.enum(["owned", "rented"]),
     rentalCompany: z.string().trim().max(160).optional().default(""),
-    driverIds: z.array(id).default([]),
+    driverIds: z.array(sqlGuid).default([]),
     active
   }),
   accessProfiles: z.object({
-    clientId: optionalId,
+    clientId: optionalSqlGuid,
     name: z.string().trim().min(2).max(100),
     description: z.string().trim().max(500).optional().default(""),
     color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
@@ -86,11 +84,21 @@ export const entitySchemas = {
     email: z.email(),
     name: z.string().trim().min(2).max(160),
     role: z.enum(["admin", "inspector", "supplier"]),
-    companyId: optionalId,
+    companyId: optionalSqlGuid,
     active
   }).superRefine((value, context) => {
     if (value.role === "supplier" && !value.companyId) context.addIssue({ code: "custom", path: ["companyId"], message: "Fornecedor deve possuir empresa." });
   })
+} as const;
+
+export const entityUpdateSchemas = {
+  clients: entitySchemas.clients.partial(),
+  projects: entitySchemas.projects.partial(),
+  companies: z.object(entitySchemas.companies.shape).partial(),
+  drivers: entitySchemas.drivers.partial(),
+  vehicles: entitySchemas.vehicles.partial(),
+  accessProfiles: entitySchemas.accessProfiles.partial(),
+  users: z.object(entitySchemas.users.shape).partial()
 } as const;
 
 export type EntityName = keyof typeof entitySchemas;
