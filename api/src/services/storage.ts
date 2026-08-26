@@ -7,9 +7,7 @@ import type { FileKind } from "../validation/files";
 import { badRequest } from "../utils/errors";
 
 const DOCUMENT_MIMES = new Set([
-  "application/pdf", "image/jpeg", "image/png",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  "application/pdf", "image/jpeg", "image/png"
 ]);
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png"]);
 const PATH_PREFIX: Record<FileKind, string> = {
@@ -51,10 +49,15 @@ function blobService(): BlobServiceClient {
   return client;
 }
 
-export function validateFile(kind: FileKind, mimeType: string, size: number): void {
+export function validateFile(kind: FileKind, fileName: string, mimeType: string, size: number): void {
   const image = kind === "inspection-photo" || kind === "client-branding";
-  if (!(image ? IMAGE_MIMES : DOCUMENT_MIMES).has(mimeType)) throw badRequest(image ? "Use uma imagem JPG ou PNG." : "Formato não permitido. Use PDF, JPG, PNG, DOCX ou XLSX.");
-  const limit = image ? 20 * 1024 * 1024 : 10 * 1024 * 1024;
+  if (!(image ? IMAGE_MIMES : DOCUMENT_MIMES).has(mimeType)) throw badRequest(image ? "Use uma imagem JPG ou PNG." : "Formato não permitido. Use PDF, JPG ou PNG.");
+  const suffix = fileName.split(".").pop()?.toLowerCase() || "";
+  const allowedExtensions = image ? new Set(["jpg", "jpeg", "png"]) : new Set(["pdf", "jpg", "jpeg", "png"]);
+  if (!allowedExtensions.has(suffix)) throw badRequest(image ? "Use uma imagem com extensão JPG, JPEG ou PNG." : "Use um arquivo PDF, JPG, JPEG ou PNG.");
+  const expectedMimes: Record<string, string[]> = { pdf: ["application/pdf"], jpg: ["image/jpeg"], jpeg: ["image/jpeg"], png: ["image/png"] };
+  if (!expectedMimes[suffix]?.includes(mimeType)) throw badRequest("A extensão do arquivo não corresponde ao tipo informado.");
+  const limit = kind === "client-branding" ? 5 * 1024 * 1024 : image ? 20 * 1024 * 1024 : 10 * 1024 * 1024;
   if (size > limit) throw badRequest(`O arquivo deve ter no máximo ${limit / 1024 / 1024} MB.`);
 }
 

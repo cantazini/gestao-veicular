@@ -39,6 +39,10 @@ export function calculateCompliance(items: Pick<InspectionItemInput, "status">[]
   return { compliant, nonCompliant, notApplicable, applicable, total: items.length, percentage };
 }
 
+export function resolveInspectionResult(percentage: number, threshold: number): "APROVADO" | "REPROVADO" {
+  return percentage >= threshold ? "APROVADO" : "REPROVADO";
+}
+
 export function validateChecklist(items: InspectionItemInput[]): void {
   const expected = new Map<string, { key: string; label: string; categoryKey: string; categoryLabel: string }>(CHECKLIST_ITEMS.map((item) => [item.key, item]));
   const keys = new Set(items.map((item) => item.key));

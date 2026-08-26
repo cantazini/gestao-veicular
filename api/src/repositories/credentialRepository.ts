@@ -1,15 +1,30 @@
 import { getPool, sql } from "../services/sql";
 import type { AppUser } from "../types/auth";
+import type { CredentialQuery } from "../validation/credentials";
 
-export async function listCredentialEligibility(user: AppUser): Promise<Record<string, unknown>[]> {
+export async function listCredentialEligibility(user: AppUser, filters: CredentialQuery = {}): Promise<Record<string, unknown>[]> {
   const pool = await getPool();
   const request = pool.request();
   if (user.companyId) request.input("companyId", sql.UniqueIdentifier, user.companyId);
-  const scope = user.role === "supplier" ? "AND v.company_id=@companyId" : "";
+  const where = ["v.active=1", "d.active=1", "co.active=1", "ap.active=1"];
+  if (user.role === "supplier") where.push("v.company_id=@companyId");
+  const identifiers: [keyof CredentialQuery, string][] = [
+    ["clientId", "cl.id=@clientId"], ["companyId", "v.company_id=@filterCompanyId"],
+    ["vehicleId", "v.id=@vehicleId"], ["accessProfileId", "ap.id=@accessProfileId"]
+  ];
+  identifiers.forEach(([key, clause]) => {
+    const value = filters[key];
+    if (!value) return;
+    const parameter = key === "companyId" ? "filterCompanyId" : key;
+    request.input(parameter, sql.UniqueIdentifier, value);
+    where.push(clause);
+  });
   const result = await request.query(`
     SELECT v.id AS vehicleId,v.plate,v.brand,v.model,v.year,v.type AS vehicleType,v.company_id AS companyId,
       d.id AS driverId,d.name AS driverName,d.registration,d.license_category AS licenseCategory,d.license_expiry AS licenseExpiry,
-      d.provisional_license AS provisionalLicense,co.legal_name AS companyName,ap.name AS accessProfileName,
+      d.provisional_license AS provisionalLicense,co.legal_name AS companyName,cl.id AS clientId,cl.name AS clientName,
+      cl.logo_blob_path AS clientLogoBlobPath,ap.id AS accessProfileId,ap.name AS accessProfileName,ap.description AS accessProfileDescription,ap.color AS accessProfileColor,
+      CONCAT('MGV-',v.plate,'-',LEFT(CONVERT(varchar(36),v.id),8),'-',LEFT(CONVERT(varchar(36),d.id),4)) AS credentialCode,
       s.maximum_fleet_age AS maximumFleetAge,s.allow_provisional_license AS allowProvisionalLicense,
       s.block_vehicle_for_any_irregular_driver AS blockAnyDriver,s.credential_maximum_days AS credentialMaximumDays,
       (SELECT COUNT(*) FROM dbo.document_requirements r WHERE r.entity_type='company' AND r.required=1 AND NOT EXISTS(
@@ -25,9 +40,9 @@ export async function listCredentialEligibility(user: AppUser): Promise<Record<s
       ) expiries WHERE expiry_date>=CAST(GETUTCDATE() AS date)) AS nearestDocumentExpiry
     FROM dbo.vehicle_drivers link
     JOIN dbo.vehicles v ON v.id=link.vehicle_id JOIN dbo.drivers d ON d.id=link.driver_id
-    JOIN dbo.companies co ON co.id=v.company_id JOIN dbo.access_profiles ap ON ap.id=v.access_profile_id
+    JOIN dbo.companies co ON co.id=v.company_id JOIN dbo.clients cl ON cl.id=co.client_id JOIN dbo.access_profiles ap ON ap.id=v.access_profile_id
     CROSS JOIN dbo.system_settings s
-    WHERE v.active=1 AND d.active=1 AND co.active=1 ${scope}
+    WHERE ${where.join(" AND ")}
     ORDER BY co.legal_name,v.plate,d.name
   `);
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);

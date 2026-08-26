@@ -1,12 +1,12 @@
 import { getPool, sql, withTransaction } from "../services/sql";
-import { calculateCompliance, CHECKLIST_ITEMS, validateChecklist } from "../services/checklist";
+import { calculateCompliance, CHECKLIST_ITEMS, resolveInspectionResult, validateChecklist } from "../services/checklist";
 import type { AppUser } from "../types/auth";
 import type { InspectionInput, PageResult } from "../types/domain";
 import { badRequest, conflict, notFound } from "../utils/errors";
 import { normalizePlate } from "../utils/normalize";
 import { sqlTime, toSqlLocalDateTime } from "../validation/sqlFields";
 
-interface InspectionQuery {
+export interface InspectionQuery {
   page: number; pageSize: number; startDate?: string; endDate?: string; clientId?: string; companyId?: string;
   projectId?: string; vehicleId?: string; driverId?: string; plate?: string; result?: string; inspector?: string;
 }
@@ -23,7 +23,7 @@ const defaultPersistenceDependencies: InspectionPersistenceDependencies = {
   createId: () => crypto.randomUUID()
 };
 
-function bindOptionalFilters(request: sql.Request, filters: InspectionQuery): string[] {
+export function bindOptionalFilters(request: sql.Request, filters: InspectionQuery): string[] {
   const where = ["1=1"];
   const fields: [keyof InspectionQuery, string, sql.ISqlTypeFactoryWithLength | sql.ISqlTypeFactoryWithNoParams][] = [
     ["startDate", "i.inspection_date>=@startDate", sql.Date], ["endDate", "i.inspection_date<=@endDate", sql.Date],
@@ -81,8 +81,9 @@ export async function getInspection(id: string, user: AppUser): Promise<Record<s
       i.compliant_count AS compliantCount, i.non_compliant_count AS nonCompliantCount,
       i.not_applicable_count AS notApplicableCount, i.applicable_count AS applicableCount,
       i.threshold_percentage AS thresholdPercentage, i.result, i.general_observations AS generalObservations,
-      i.snapshot_json AS snapshotJson, u.name AS inspectorName, i.created_at AS createdAt
-    FROM dbo.inspections i JOIN dbo.app_users u ON u.id=i.inspector_user_id WHERE i.id=@id ${supplierScope};
+      i.snapshot_json AS snapshotJson, u.name AS inspectorName, i.client_id AS clientId,
+      c.logo_blob_path AS clientLogoBlobPath, i.created_at AS createdAt
+    FROM dbo.inspections i JOIN dbo.app_users u ON u.id=i.inspector_user_id JOIN dbo.clients c ON c.id=i.client_id WHERE i.id=@id ${supplierScope};
     SELECT id, item_key AS [key], category_key AS categoryKey, category_label AS categoryLabel,
       item_label AS label, status, observation, display_order AS displayOrder
     FROM dbo.inspection_items WHERE inspection_id=@id ORDER BY display_order;
@@ -93,9 +94,10 @@ export async function getInspection(id: string, user: AppUser): Promise<Record<s
   const sets = result.recordsets as unknown as Record<string, unknown>[][];
   const inspection = sets[0][0];
   if (!inspection) return null;
-  const { snapshotJson, ...base } = inspection;
+  const { snapshotJson, clientLogoBlobPath, ...base } = inspection;
   return {
     ...base,
+    clientLogoUrl: clientLogoBlobPath ? `/api/clients/${inspection.clientId}/logo` : null,
     snapshot: snapshotJson ? JSON.parse(String(snapshotJson)) : {},
     items: sets[1],
     photos: sets[2].map((photo) => ({ ...photo, url: `/api/files/${photo.id}` }))
@@ -145,7 +147,7 @@ export async function createInspection(input: InspectionInput, actor: AppUser, d
 
     const settingsResult = await dependencies.createRequest(transaction).query("SELECT minimum_inspection_compliance FROM dbo.system_settings WHERE id=1");
     const threshold = Number(settingsResult.recordset[0]?.minimum_inspection_compliance ?? 90);
-    const resultStatus = summary.percentage >= threshold ? "APROVADO" : "REPROVADO";
+    const resultStatus = resolveInspectionResult(summary.percentage, threshold);
     const sequence = Number(row.inspection_sequence || 0) + 1;
     const code = `VIST-${row.plate_normalized}-${String(sequence).padStart(3, "0")}`;
     const snapshot = {

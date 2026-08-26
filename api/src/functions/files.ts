@@ -1,6 +1,6 @@
 import { app } from "@azure/functions";
 import { withApi } from "../middleware/withApi";
-import { assertFileEntityAccess, deleteFileMetadata, findFile, getClientLogoPath, saveFileMetadata } from "../repositories/fileRepository";
+import { assertFileEntityAccess, clearClientLogoPath, deleteFileMetadata, findFile, getClientLogoPath, saveFileMetadata } from "../repositories/fileRepository";
 import { createBlobPath, createDownloadUrl, createUploadUrl, deleteBlob, expectedPrefix, validateFile } from "../services/storage";
 import { completeUploadSchema, uploadRequestSchema } from "../validation/files";
 import { sqlGuid } from "../validation/sqlFields";
@@ -11,7 +11,7 @@ app.http("fileUploadUrl", {
   methods: ["POST"], authLevel: "anonymous", route: "files/upload-url",
   handler: withApi(async (request, _context, auth) => {
     const input = uploadRequestSchema.parse(await request.json());
-    validateFile(input.kind, input.mimeType, input.size);
+    validateFile(input.kind, input.fileName, input.mimeType, input.size);
     await assertFileEntityAccess(input.kind, input.entityId, auth.user, true);
     const blobPath = createBlobPath(input.kind, input.entityId, input.fileName, input.mimeType);
     return json({ blobPath, uploadUrl: await createUploadUrl(blobPath), expiresInSeconds: 600 });
@@ -20,12 +20,16 @@ app.http("fileUploadUrl", {
 
 app.http("fileComplete", {
   methods: ["POST"], authLevel: "anonymous", route: "files/complete",
-  handler: withApi(async (request, _context, auth) => {
+  handler: withApi(async (request, context, auth) => {
     const input = completeUploadSchema.parse(await request.json());
-    validateFile(input.kind, input.mimeType, input.size);
+    validateFile(input.kind, input.fileName, input.mimeType, input.size);
     await assertFileEntityAccess(input.kind, input.entityId, auth.user, true);
     if (!input.blobPath.startsWith(expectedPrefix(input.kind, input.entityId))) throw badRequest("Caminho de arquivo inválido.");
+    const previousLogo = input.kind === "client-branding" ? await getClientLogoPath(input.entityId, auth.user) : null;
     const id = await saveFileMetadata(input, auth.user.id);
+    if (previousLogo && previousLogo !== input.blobPath) {
+      await deleteBlob(previousLogo).catch(() => context.warn("Não foi possível remover o logotipo anterior do armazenamento.", { clientId: input.entityId }));
+    }
     return json({ id }, 201);
   })
 });
@@ -49,11 +53,17 @@ app.http("fileById", {
 });
 
 app.http("clientLogo", {
-  methods: ["GET"], authLevel: "anonymous", route: "clients/{id}/logo",
-  handler: withApi(async (request, _context, auth) => {
+  methods: ["GET", "DELETE"], authLevel: "anonymous", route: "clients/{id}/logo",
+  handler: withApi(async (request, context, auth) => {
     const id = sqlGuid.parse(request.params.id);
     const path = await getClientLogoPath(id, auth.user);
     if (!path) throw notFound("Este cliente não possui logotipo cadastrado.");
+    if (request.method === "DELETE") {
+      if (auth.user.role !== "admin") throw forbidden();
+      await clearClientLogoPath(id, auth.user.id);
+      await deleteBlob(path).catch(() => context.warn("Não foi possível remover o logotipo do armazenamento.", { clientId: id }));
+      return noContent();
+    }
     return { status: 302, headers: { Location: await createDownloadUrl(path), "Cache-Control": "private, no-store" } };
   })
 });

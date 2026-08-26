@@ -1,4 +1,5 @@
 import { api, mockMode } from "./api";
+import { normalizeDocumentDates, validateDocumentDates } from "./documents";
 
 export type ManagedFileKind = "company-document" | "driver-document" | "vehicle-document" | "inspection-photo" | "client-branding";
 
@@ -20,7 +21,10 @@ export interface ManagedFileInput {
 export async function uploadManagedFile(input: ManagedFileInput, file: File | Blob, fileName?: string): Promise<{ id: string; blobPath: string }> {
   const name = fileName || (file instanceof File ? file.name : "arquivo.bin");
   const mimeType = file.type;
-  const common = { ...input, fileName: name, mimeType, size: file.size };
+  const dateError = validateDocumentDates(input);
+  if (dateError) throw new Error(dateError);
+  const { issueDate: _issueDate, expiryDate: _expiryDate, ...inputWithoutDates } = input;
+  const common = { ...inputWithoutDates, ...normalizeDocumentDates(input), fileName: name, mimeType, size: file.size };
   if (mockMode) {
     const blobPath = `mock/${input.entityId}/${crypto.randomUUID()}-${name}`;
     const completed = await api<{ id: string }>("/files/complete", { method: "POST", body: JSON.stringify({ ...common, blobPath }) });

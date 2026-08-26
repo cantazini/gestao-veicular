@@ -14,6 +14,9 @@ export interface FileRecord {
 export async function assertFileEntityAccess(kind: FileKind, entityId: string, user: AppUser, write: boolean): Promise<void> {
   if (kind === "client-branding") {
     if (user.role !== "admin") throw forbidden();
+    const pool = await getPool();
+    const result = await pool.request().input("id", sql.UniqueIdentifier, entityId).query("SELECT id FROM dbo.clients WHERE id=@id");
+    if (!result.recordset[0]) throw notFound("Cliente não encontrado.");
     return;
   }
   if (kind === "inspection-photo") {
@@ -48,7 +51,7 @@ export async function getClientLogoPath(clientId: string, user: AppUser): Promis
 
 export async function saveFileMetadata(input: {
   kind: FileKind; entityId: string; blobPath: string; fileName: string; mimeType: string; size: number;
-  documentType?: string; label?: string; expiryDate?: string | null; photoType?: string; description?: string;
+  documentType?: string; label?: string; issueDate?: string | null; expiryDate?: string | null; observation?: string; photoType?: string; description?: string;
   width?: number; height?: number; originalSize?: number;
 }, actorId: string): Promise<string> {
   const id = crypto.randomUUID();
@@ -75,9 +78,10 @@ export async function saveFileMetadata(input: {
     .input("type", sql.NVarChar(60), input.documentType || "other").input("label", sql.NVarChar(140), input.label || input.fileName)
     .input("fileName", sql.NVarChar(220), input.fileName).input("path", sql.NVarChar(700), input.blobPath)
     .input("mime", sql.NVarChar(120), input.mimeType).input("size", sql.BigInt, input.size)
-    .input("expiry", sql.Date, input.expiryDate || null).input("actorId", sql.UniqueIdentifier, actorId)
-    .query(`INSERT INTO dbo.${table} (id,${foreignKey},document_type,label,original_filename,blob_path,mime_type,file_size,expiry_date,created_by,updated_by)
-            VALUES (@id,@entityId,@type,@label,@fileName,@path,@mime,@size,@expiry,@actorId,@actorId)`);
+    .input("issue", sql.Date, input.issueDate || null).input("expiry", sql.Date, input.expiryDate || null)
+    .input("observation", sql.NVarChar(500), input.observation || "").input("actorId", sql.UniqueIdentifier, actorId)
+    .query(`INSERT INTO dbo.${table} (id,${foreignKey},document_type,label,original_filename,blob_path,mime_type,file_size,issue_date,expiry_date,observation,created_by,updated_by)
+            VALUES (@id,@entityId,@type,@label,@fileName,@path,@mime,@size,@issue,@expiry,@observation,@actorId,@actorId)`);
   return id;
 }
 
@@ -97,4 +101,10 @@ export async function deleteFileMetadata(record: FileRecord): Promise<void> {
   const table = record.kind === "company-document" ? "company_documents" : record.kind === "driver-document" ? "driver_documents" : record.kind === "vehicle-document" ? "vehicle_documents" : "inspection_photos";
   const pool = await getPool();
   await pool.request().input("id", sql.UniqueIdentifier, record.id).query(`DELETE FROM dbo.${table} WHERE id=@id`);
+}
+
+export async function clearClientLogoPath(clientId: string, actorId: string): Promise<void> {
+  const pool = await getPool();
+  await pool.request().input("id", sql.UniqueIdentifier, clientId).input("actorId", sql.UniqueIdentifier, actorId)
+    .query("UPDATE dbo.clients SET logo_blob_path=NULL,updated_at=SYSUTCDATETIME(),updated_by=@actorId WHERE id=@id");
 }

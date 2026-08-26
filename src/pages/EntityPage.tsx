@@ -190,7 +190,7 @@ export function EntityPage({ entity }: { entity: EntityName }) {
           try {
             await uploadManagedFile({
               kind: `${documentEntity}-document`, entityId: saved.id, documentType: document.documentType,
-              label: document.label, issueDate: document.issueDate || null, expiryDate: document.expiryDate || null,
+              label: document.label, issueDate: document.issueDate, expiryDate: document.expiryDate,
               observation: document.observation
             }, document.file);
           } catch (reason) { warnings.push(`“${document.label}” não foi enviado: ${(reason as Error).message}`); }

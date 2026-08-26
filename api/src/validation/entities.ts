@@ -13,7 +13,6 @@ export const entitySchemas = {
     name: z.string().trim().min(2).max(140),
     legalName: z.string().trim().min(2).max(180),
     document: cnpj,
-    logoBlobPath: z.string().trim().max(700).optional().default(""),
     active
   }),
   projects: z.object({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCompliance, CHECKLIST_ITEMS, validateChecklist } from "../services/checklist";
+import { calculateCompliance, CHECKLIST_ITEMS, resolveInspectionResult, validateChecklist } from "../services/checklist";
 import type { InspectionItemInput } from "../types/domain";
 
 function items(): InspectionItemInput[] {
@@ -21,5 +21,11 @@ describe("checklist", () => {
     const sample = items();
     sample[0].status = "nao_conforme";
     expect(() => validateChecklist(sample)).toThrow(/Descreva/);
+  });
+
+  it("usa uma única regra para aprovação e reprovação", () => {
+    expect(resolveInspectionResult(100, 90)).toBe("APROVADO");
+    expect(resolveInspectionResult(96, 90)).toBe("APROVADO");
+    expect(resolveInspectionResult(96, 97)).toBe("REPROVADO");
   });
 });

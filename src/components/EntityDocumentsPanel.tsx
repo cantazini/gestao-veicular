@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, FilePlus2, Pencil, RefreshCw, Save, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
-import { documentStatusLabel, documentTypeLabel, documentTypeOptions } from "../lib/documents";
+import { documentStatusLabel, documentTypeLabel, documentTypeOptions, normalizeDocumentDates, validateDocumentDates } from "../lib/documents";
 import { uploadManagedFile, validateLocalFile } from "../lib/files";
 import { formatDate } from "../lib/format";
 import type { DocumentEntityType, DocumentRecord } from "../types";
@@ -44,6 +44,8 @@ export function EntityDocumentsPanel({ entityType, entityId, pending, onPendingC
     if (!file) { setMessage("Selecione um arquivo para adicionar."); return; }
     const validation = validateLocalFile(file);
     if (validation) { setMessage(validation); return; }
+    const dateError = validateDocumentDates(draft);
+    if (dateError) { setMessage(dateError); return; }
     onPendingChange([...pending, { localId: crypto.randomUUID(), file, ...draft, label: draft.label || file.name }]);
     setFile(null); setDraft(blankDraft(entityType)); setMessage("");
   };
@@ -69,11 +71,13 @@ export function EntityDocumentsPanel({ entityType, entityId, pending, onPendingC
   };
   const saveMetadata = async () => {
     if (!editing) return;
+    const dateError = validateDocumentDates(editing);
+    if (dateError) { setMessage(dateError); return; }
     try {
       setBusyId(editing.id);
       await api(`/documents/${editing.id}`, { method: "PUT", body: JSON.stringify({
-        documentType: editing.documentType, label: editing.label, issueDate: editing.issueDate || null,
-        expiryDate: editing.expiryDate || null, observation: editing.observation || ""
+        documentType: editing.documentType, label: editing.label, ...normalizeDocumentDates(editing, "null"),
+        observation: editing.observation || ""
       }) });
       await refresh(); setEditing(null); setMessage("Dados do documento atualizados.");
     } catch (reason) { setMessage((reason as Error).message); }

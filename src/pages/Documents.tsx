@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, FileCheck2, Pencil, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
-import { documentCategoryLabel, documentStatusLabel, documentTypeLabel, documentTypeOptions } from "../lib/documents";
+import { documentCategoryLabel, documentStatusLabel, documentTypeLabel, documentTypeOptions, normalizeDocumentDates, validateDocumentDates } from "../lib/documents";
 import { uploadManagedFile, validateLocalFile } from "../lib/files";
 import { formatDate } from "../lib/format";
 import type { DocumentEntityType, DocumentRecord, DocumentStatus, Entity, PageResult } from "../types";
@@ -57,9 +57,11 @@ export function Documents() {
   };
   const save = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (!editing) return;
+    const dateError = validateDocumentDates(editing);
+    if (dateError) { setMessage(dateError); return; }
     try {
       setBusy(true);
-      await api(`/documents/${editing.id}`, { method: "PUT", body: JSON.stringify({ documentType: editing.documentType, label: editing.label, issueDate: editing.issueDate || null, expiryDate: editing.expiryDate || null, observation: editing.observation || "" }) });
+      await api(`/documents/${editing.id}`, { method: "PUT", body: JSON.stringify({ documentType: editing.documentType, label: editing.label, ...normalizeDocumentDates(editing, "null"), observation: editing.observation || "" }) });
       await refresh(); setEditing(null); setMessage("Documento atualizado.");
     } catch (reason) { setMessage((reason as Error).message); }
     finally { setBusy(false); }

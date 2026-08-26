@@ -13,9 +13,16 @@ export const optionalSqlGuid = z.preprocess(
   sqlGuid.optional()
 );
 
+export const sqlDate = z.iso.date("Informe uma data válida.");
+
 export const optionalSqlDate = z.preprocess(
   emptyValueToUndefined,
-  z.iso.date().optional()
+  sqlDate.optional()
+);
+
+export const editableSqlDate = z.preprocess(
+  (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.union([sqlDate, z.null()]).optional()
 );
 
 export const sqlTime = z.string().trim().regex(

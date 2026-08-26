@@ -25,7 +25,7 @@ export const entityDefinitions: Record<EntityName, EntityDefinition> = {
     fields: {
       id: { column: "id", type: "uuid" }, name: { column: "name", type: "text", writable: true },
       legalName: { column: "legal_name", type: "text", writable: true }, document: { column: "document", type: "text", writable: true },
-      logoBlobPath: { column: "logo_blob_path", type: "text", writable: true }, active: { column: "active", type: "bit", writable: true }, ...auditFields
+      logoBlobPath: { column: "logo_blob_path", type: "text" }, active: { column: "active", type: "bit", writable: true }, ...auditFields
     }
   },
   projects: {
