@@ -13,13 +13,16 @@ Esta pasta é independente. A V2 original não foi alterada e pode continuar ser
 - cadastro de clientes com Razão Social, Nome Fantasia, máscara/validação de CNPJ e bloqueio de duplicidade;
 - vínculos progressivos entre cliente, projeto, empresa, veículo, motorista e vistoria, validados também pela API;
 - documentos privados com URLs SAS curtas;
+- documentos anexados diretamente nos cadastros de Empresa, Motorista e Veículo, com Central de Documentos, emissão, validade, observação e status calculado;
 - checklist oficial com 39 itens, divididos em 10 + 12 + 9 + 8;
 - cálculo de conformidade e resultado repetido no servidor;
 - código sequencial por veículo e snapshots históricos;
 - até oito posições fotográficas, com redução da imagem no navegador;
 - histórico, reprovações e relatório profissional para impressão A4/PDF;
+- filtros de Histórico executados no backend e Reprovações restrita ao resultado persistido `REPROVADO`;
 - registro fotográfico com três imagens por linha na impressão;
 - credenciais veiculares individuais ou em lote;
+- credenciais por seleção progressiva Cliente → Empresa → Veículo → Perfil de Acesso, usando os IDs reais dos cadastros;
 - exportação XLSX achatada para Excel e Power BI;
 - importação XLSX em massa com modelo, pré-visualização, validação de vínculos e confirmação;
 - scripts SQL, migração controlada e workflow de implantação.
@@ -146,7 +149,8 @@ O modo `DEV_AUTH` da API falha se o ambiente não for `Development` ou se a cham
 2. Conecte ao banco `sqldb-meta-gestao-veicular` usando essa conta administrativa.
 3. Execute [database/001_schema.sql](database/001_schema.sql).
 4. Execute [database/003_clients_unique_cnpj.sql](database/003_clients_unique_cnpj.sql). A migração interrompe com uma mensagem clara se já houver CNPJs duplicados; nesse caso, saneie os registros antes de executá-la novamente.
-5. Crie um usuário SQL contido e exclusivo para a API, com senha forte gerada fora do repositório. Não use a conta administrativa na aplicação:
+5. Execute [database/004_document_metadata.sql](database/004_document_metadata.sql). Essa migration é idempotente e adiciona somente `issue_date` e `observation` às tabelas `company_documents`, `driver_documents` e `vehicle_documents`.
+6. Crie um usuário SQL contido e exclusivo para a API, com senha forte gerada fora do repositório. Não use a conta administrativa na aplicação:
 
    ```sql
    CREATE USER [meta_gestao_api] WITH PASSWORD = '<SENHA_FORTE_FORA_DO_GIT>';
@@ -154,14 +158,14 @@ O modo `DEV_AUTH` da API falha se o ambiente não for `Development` ou se a cham
    ALTER ROLE db_datawriter ADD MEMBER [meta_gestao_api];
    ```
 
-6. Monte `SQL_CONNECTION_STRING` com esse usuário, apontando diretamente para o banco da aplicação:
+7. Monte `SQL_CONNECTION_STRING` com esse usuário, apontando diretamente para o banco da aplicação:
 
    ```text
    Server=tcp:sql-meta-gestao-veicular.database.windows.net,1433;Initial Catalog=sqldb-meta-gestao-veicular;Persist Security Info=False;User ID=meta_gestao_api;Password=<SENHA_REAL>;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
    ```
 
-7. Cadastre a string somente nas Application Settings do backend, conforme a seção abaixo.
-8. Crie o primeiro perfil interno usando [database/002_first_admin.template.sql](database/002_first_admin.template.sql). Substitua apenas os marcadores; o arquivo não contém credenciais.
+8. Cadastre a string somente nas Application Settings do backend, conforme a seção abaixo.
+9. Crie o primeiro perfil interno usando [database/002_first_admin.template.sql](database/002_first_admin.template.sql). Substitua apenas os marcadores; o arquivo não contém credenciais.
 
 `database/test_data.local.sql` é exclusivamente demonstrativo. Não execute em produção.
 
@@ -248,11 +252,27 @@ Fotografias são preparadas no navegador com dimensão máxima de 1920 px e qual
 4. a API confirma metadados no SQL;
 5. relatórios recebem apenas uma URL temporária de leitura.
 
-Documentos aceitos: PDF, JPG, PNG, DOCX e XLSX, até 10 MB. Fotos: JPG ou PNG, até 20 MB antes da redução.
+Documentos aceitos: PDF, JPG/JPEG e PNG, até 10 MB. A API confere MIME type, extensão e coerência entre ambos. Fotos: JPG ou PNG, até 20 MB antes da redução. Logos de clientes: JPG ou PNG, até 5 MB.
+
+### Fluxo de documentos
+
+Nos formulários **Nova/Editar Empresa**, **Novo/Editar Motorista** e **Novo/Editar Veículo**, a seção **Documentos** permite informar tipo, emissão, validade, observação e arquivo. Em um novo cadastro, o sistema salva primeiro a entidade para obter seu `uniqueidentifier` real e depois envia os anexos. Se um arquivo falhar, a entidade continua salva e a tela informa exatamente qual anexo precisa ser tentado novamente.
+
+Na edição, os documentos existentes podem ser abertos, substituídos, removidos ou ter seus metadados atualizados sem recriar a entidade. A tela **Central de Documentos** reúne as três categorias e oferece filtros por cliente, empresa, tipo, categoria e status:
+
+- **Válido**: sem vencimento ou fora da janela de alerta;
+- **Próximo do vencimento**: dentro de `expiry_alert_days`;
+- **Vencido**: validade anterior à data atual.
+
+O status é calculado na consulta a partir da validade e da configuração atual; ele não é duplicado como texto estático no banco.
 
 ## Clientes e identidade visual
 
-A marca Meta é global e usa a nova logo branca fornecida no login/menu. Klabin não é fixa na aplicação: é um cliente de demonstração e sua logo aparece somente porque o registro do cliente aponta para ela. Em produção, faça upload da logo de cada cliente no cadastro correspondente. O snapshot da vistoria guarda a identidade do cliente existente na data da inspeção.
+A marca Meta é global e usa a nova logo branca fornecida no login/menu. Cada Cliente possui sua própria logo, enviada no cadastro em PNG/JPG para o Blob privado; o SQL guarda somente o caminho permanente do blob, nunca uma SAS. O relatório consulta a rota autenticada `/api/clients/{id}/logo`, que redireciona para uma SAS curta somente no momento da leitura.
+
+Para a operação atual, o arquivo Klabin fornecido está em `public/assets/logo-klabin.png` e é usado como fallback temporário somente quando o cliente se chama exatamente **Klabin**. Outros clientes sem logo continuam com o relatório íntegro e sem imagem quebrada. Uma logo cadastrada no Blob sempre tem prioridade. Esse fallback pode ser removido depois que a logo Klabin estiver confirmada no cadastro de produção.
+
+No cadastro de Cliente é possível selecionar, substituir ou remover a logo. A substituição atualiza o caminho SQL e tenta limpar o blob anterior; a remoção limpa o caminho e elimina o arquivo. O container permanece privado.
 
 ## Experiência da interface e autenticação
 
@@ -263,9 +283,11 @@ A interface possui um design system leve em CSS puro, sem biblioteca visual adic
 - modais mantêm cabeçalho e ações visíveis, com rolagem apenas na área de campos, fechamento por `Esc` e adaptação para tablet/celular;
 - formulários exibem campos obrigatórios, agrupamentos, máscaras de CNPJ/telefone, ajuda contextual e múltipla seleção por caixas marcáveis;
 - a nova vistoria orienta a dependência **Empresa → Projeto → Veículo → Motorista** e explica por que uma opção ainda está bloqueada;
-- o Histórico aplica de fato os filtros de busca e resultado e oferece estados explícitos de carregamento, erro e lista vazia.
+- o Histórico consulta todas as vistorias concluídas e envia período, cliente, empresa, projeto, veículo, motorista, placa e resultado para a API;
+- Reprovações sempre envia `result=REPROVADO` ao backend. A consulta SQL usa `inspections.result`, persistido pela regra única do servidor;
+- caches de entidades são atualizados por prefixo e invalidados após POST/PUT, incluindo opções de vistoria, documentos e credenciais; um cadastro novo aparece nas telas dependentes sem F5.
 
-O login foi redesenhado, mas o método de autenticação não mudou: o botão **Continuar com Microsoft** encaminha para `/.auth/login/aad`. Não existem campos locais de usuário ou senha porque isso faria a aplicação receber credenciais e exigiria uma nova arquitetura de identidade, recuperação de conta, MFA, proteção contra ataques e auditoria. Com o SSO, a senha permanece somente no Microsoft Entra ID.
+O login foi redesenhado, mas o método de autenticação não mudou: o botão **Continuar com Microsoft** encaminha para `/.auth/login/aad` com retorno explícito `/?auth=callback`. No retorno, a aplicação consulta primeiro `/.auth/me`, mostra **Validando sua sessão…** e só então consulta `/api/auth/me`. Há poucas tentativas com espera curta apenas para um `401` transitório de propagação da sessão; erros `403` de usuário sem `app_user` ou usuário inativo são mostrados e não entram em loop. Não existem campos locais de usuário ou senha. Com o SSO, a senha permanece somente no Microsoft Entra ID.
 
 ### O que é o perfil de circulação e acesso
 
@@ -278,6 +300,16 @@ O campo exibido no veículo como **Perfil de circulação e acesso** corresponde
 5. seus dados são copiados para o snapshot da vistoria, preservando o histórico mesmo que a configuração mude depois.
 
 Por isso, o campo continua obrigatório. Administradores gerenciam sua origem em **Administração → Perfis de circulação e acesso**. Ao cadastrar um veículo, a lista mostra perfis globais ou pertencentes ao mesmo cliente da empresa selecionada. Se não houver opção compatível, a tela apresenta uma orientação e, para administradores, um link direto para essa configuração.
+
+### Como gerar uma credencial
+
+1. abra **Credenciais**;
+2. selecione Cliente, Empresa, Veículo/Placa e Perfil de Acesso nessa ordem;
+3. a tela envia `client.id`, `company.id`, `vehicle.id` e `accessProfile.id` para `/api/credentials/eligibility`;
+4. a API confere CNH, idade da frota, documentos obrigatórios, vínculos e regras do sistema;
+5. clique em **Gerar credencial** e depois em **Imprimir / Salvar PDF**.
+
+A placa é apenas o texto exibido; a chave do relacionamento continua sendo `vehicle.id`. O perfil vem de `dbo.access_profiles` e precisa ser o perfil já associado ao veículo. A credencial inclui as marcas Meta e Cliente quando disponíveis, empresa, motorista, veículo, perfil, validade e código identificador.
 
 ## Relatórios e PDF
 
@@ -310,14 +342,14 @@ pnpm test:all
 pnpm build:all
 ```
 
-Testes atuais cobrem autenticação, decodificação segura do principal, checklist oficial, cálculo de conformidade, estrutura das categorias, interpretação segura da connection string do Blob, CRUD/duplicidade de clientes, dependências dos cadastros e validação da importação XLSX.
+Testes atuais cobrem autenticação e callback Entra, usuário não autenticado/sem perfil/inativo, GUID SQL Server, horário de vistoria, transação/rollback, regra única de aprovação, separação Histórico/Reprovações, atualização de cache, checklist oficial, Blob/SAS, validação de arquivos, logo do cliente, documentos das três entidades, filtros da Central, credenciais por IDs reais, CRUD/duplicidade de clientes, dependências dos cadastros e importação XLSX.
 
 Checklist manual recomendado:
 
 1. entrar com administrador, fiscalizador e fornecedor;
 2. confirmar que o fornecedor enxerga apenas sua empresa;
 3. cadastrar cada entidade e editar o registro;
-4. anexar e abrir um documento;
+4. anexar, abrir, editar, substituir e remover um documento em Empresa, Motorista e Veículo; confirmar que ele também aparece na Central;
 5. criar vistoria sem fotos;
 6. criar vistoria com fotos e substituir/remover antes de salvar;
 7. abrir relatório e conferir snapshots, checklist e fotos;
@@ -327,6 +359,16 @@ Checklist manual recomendado:
 11. navegar repetidamente entre Dashboard, Clientes, Empresas, Veículos e Vistorias sem recarregar a página;
 12. recolher/expandir o menu e testar a gaveta em largura de tablet;
 13. verificar o console do navegador e logs da Function.
+
+### Passos obrigatórios antes do próximo deploy
+
+1. execute `database/004_document_metadata.sql` no banco de homologação e depois no banco de produção pela rotina aprovada;
+2. confirme o container `appfiles` como **Private**;
+3. confira o CORS do Blob para o domínio exato do Static Web App, conforme a tabela deste README;
+4. mantenha as quatro Application Settings já existentes (`SQL_CONNECTION_STRING`, `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER=appfiles`, `DEV_AUTH=false`);
+5. no sistema, abra **Clientes → Editar Klabin**, envie a logo anexada e salve; depois valide o relatório de uma vistoria;
+6. homologue o login em uma janela anônima, um usuário autorizado, um usuário sem `app_user` e um usuário inativo;
+7. execute os três comandos automatizados acima e repita o checklist manual no ambiente de preview.
 
 ## Migração da V2
 

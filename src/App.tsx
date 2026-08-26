@@ -19,8 +19,8 @@ function Admin({ children }: { children: ReactNode }) { const { user } = useAuth
 function Inspector({ children }: { children: ReactNode }) { const { user } = useAuth(); return user && ["admin", "inspector"].includes(user.role) ? children : <Navigate to="/" replace/>; }
 
 export default function App() {
-  const { user, loading } = useAuth();
-  if (loading) return <div className="splash"><img src="/assets/logo-meta-azul.png" alt="Meta"/><span>Carregando ambiente seguro…</span></div>;
+  const { user, loading, phase } = useAuth();
+  if (loading) return <div className="splash"><img src="/assets/logo-meta-azul.png" alt="Meta"/><span>{phase === "validating" ? "Validando sua sessão…" : "Carregando ambiente seguro…"}</span></div>;
   if (!user) return <Login/>;
   return <Routes><Route element={<AppLayout/>}>
     <Route index element={<Dashboard/>}/>

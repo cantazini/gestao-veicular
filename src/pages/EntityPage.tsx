@@ -4,11 +4,15 @@ import { Edit3, Plus, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { EmptyState } from "../components/EmptyState";
+import { ClientLogoPanel } from "../components/ClientLogoPanel";
+import { EntityDocumentsPanel, type PendingDocument } from "../components/EntityDocumentsPanel";
 import { FormModal } from "../components/FormModal";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import { api } from "../lib/api";
 import { formatCnpj, formatDate, onlyDigits, text } from "../lib/format";
+import { uploadManagedFile } from "../lib/files";
+import { refreshEntityQueries } from "../lib/queryCache";
 import type { Entity, PageResult } from "../types";
 
 type EntityName = "clients" | "projects" | "companies" | "drivers" | "vehicles" | "accessProfiles" | "users";
@@ -155,6 +159,9 @@ export function EntityPage({ entity }: { entity: EntityName }) {
   const [editing, setEditing] = useState<Entity | null>(null);
   const [form, setForm] = useState<Record<string, unknown>>(defaults(config.fields));
   const [message, setMessage] = useState("");
+  const [pendingDocuments, setPendingDocuments] = useState<PendingDocument[]>([]);
+  const [clientLogoFile, setClientLogoFile] = useState<File | null>(null);
+  const [clientLogoRemoved, setClientLogoRemoved] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: [entity], queryFn: () => api<PageResult<Entity>>(`/${entity}?pageSize=100`) });
   const sources = [...new Set(config.fields.map((field) => field.source).filter(Boolean))] as EntityName[];
@@ -162,20 +169,42 @@ export function EntityPage({ entity }: { entity: EntityName }) {
   const sourceQueries = sources.map((source, index) => ({ source, result: sourceResults[index] }));
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const isUpdate = Boolean(editing?.id);
-      return api<Entity>(isUpdate ? `/${entity}/${editing!.id}` : `/${entity}`, { method: isUpdate ? "PUT" : "POST", body: JSON.stringify(normalize(form, config.fields)) });
+      const saved = await api<Entity>(isUpdate ? `/${entity}/${editing!.id}` : `/${entity}`, { method: isUpdate ? "PUT" : "POST", body: JSON.stringify(normalize(form, config.fields)) });
+      const warnings: string[] = [];
+      if (entity === "clients") {
+        if (clientLogoFile) {
+          try {
+            const uploaded = await uploadManagedFile({ kind: "client-branding", entityId: saved.id }, clientLogoFile);
+            saved.logoBlobPath = uploaded.blobPath;
+          } catch (reason) { warnings.push(`A logo não foi enviada: ${(reason as Error).message}`); }
+        } else if (clientLogoRemoved && editing?.id && editing.logoBlobPath) {
+          try { await api(`/clients/${saved.id}/logo`, { method: "DELETE" }); saved.logoBlobPath = null; }
+          catch (reason) { warnings.push(`A logo não foi removida: ${(reason as Error).message}`); }
+        }
+      }
+      const documentEntity = entity === "companies" ? "company" : entity === "drivers" ? "driver" : entity === "vehicles" ? "vehicle" : null;
+      if (documentEntity) {
+        for (const document of pendingDocuments) {
+          try {
+            await uploadManagedFile({
+              kind: `${documentEntity}-document`, entityId: saved.id, documentType: document.documentType,
+              label: document.label, issueDate: document.issueDate || null, expiryDate: document.expiryDate || null,
+              observation: document.observation
+            }, document.file);
+          } catch (reason) { warnings.push(`“${document.label}” não foi enviado: ${(reason as Error).message}`); }
+        }
+      }
+      return { saved, warnings };
     },
-    onSuccess: (saved) => {
-      queryClient.setQueryData<PageResult<Entity>>([entity], (current) => current ? {
-        ...current,
-        items: current.items.some((item) => item.id === saved.id) ? current.items.map((item) => item.id === saved.id ? saved : item) : [saved, ...current.items],
-        total: current.items.some((item) => item.id === saved.id) ? current.total : current.total + 1
-      } : current);
-      void queryClient.invalidateQueries({ queryKey: [entity] });
+    onSuccess: ({ saved, warnings }) => {
+      void refreshEntityQueries(queryClient, entity, saved);
+      void queryClient.invalidateQueries({ queryKey: ["documents"] });
       setEditing(null);
       setForm(defaults(config.fields));
-      setMessage("Registro salvo com sucesso.");
+      setPendingDocuments([]); setClientLogoFile(null); setClientLogoRemoved(false);
+      setMessage(warnings.length ? `Registro salvo. ${warnings.join(" ")}` : "Registro salvo com sucesso.");
     },
     onError: (reason: Error) => setMessage(reason.message)
   });
@@ -219,6 +248,7 @@ export function EntityPage({ entity }: { entity: EntityName }) {
       if (Array.isArray(next[field.key])) next[field.key] = (next[field.key] as string[]).join(", ");
     }
     setForm(next);
+    setPendingDocuments([]); setClientLogoFile(null); setClientLogoRemoved(false);
     setMessage("");
   };
 
@@ -291,6 +321,8 @@ export function EntityPage({ entity }: { entity: EntityName }) {
             </div>}
           </Fragment>;
         })}
+        {entity === "clients" && <ClientLogoPanel clientId={editing.id || undefined} logoBlobPath={String(editing.logoBlobPath || "")} file={clientLogoFile} removed={clientLogoRemoved} onFileChange={setClientLogoFile} onRemovedChange={setClientLogoRemoved}/>} 
+        {(["companies", "drivers", "vehicles"] as EntityName[]).includes(entity) && <EntityDocumentsPanel entityType={entity === "companies" ? "company" : entity === "drivers" ? "driver" : "vehicle"} entityId={editing.id || undefined} pending={pendingDocuments} onPendingChange={setPendingDocuments} canWrite={Boolean(canWrite)}/>} 
       </div>
     </FormModal>}
   </>;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useMutation, useQueries } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Camera, Car, Check, ChevronLeft, ChevronRight, FolderKanban, ImagePlus, Save, Trash2, UserRound } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { EmptyState } from "../components/EmptyState";
@@ -16,6 +16,7 @@ const label = (item?: Entity) => String(item?.name || item?.legalName || item?.p
 
 export function NewInspection() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ companyId: "", projectId: "", vehicleId: "", driverId: "", inspectionDate: today(), inspectionTime: currentTime(), mileage: 0, generalObservations: "" });
   const [items, setItems] = useState(newChecklist());
@@ -35,6 +36,7 @@ export function NewInspection() {
   const [companies, projects, vehicles, drivers] = optionQueries.map((query) => query.data?.items || []);
   const optionsLoading = optionQueries.some((query) => query.isLoading);
   const optionsError = optionQueries.find((query) => query.isError)?.error;
+  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: () => api<{ minimumInspectionCompliance: number }>("/settings") });
   const selectedCompany = companies.find((company) => company.id === form.companyId);
   const selectedProject = projects.find((project) => project.id === form.projectId);
   const selectedVehicle = vehicles.find((vehicle) => vehicle.id === form.vehicleId);
@@ -69,7 +71,14 @@ export function NewInspection() {
       }
       return inspection;
     },
-    onSuccess: (inspection) => navigate(`/vistorias/${inspection.id}`),
+    onSuccess: (inspection) => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["inspections"], refetchType: "all" }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"], refetchType: "all" }),
+        queryClient.invalidateQueries({ queryKey: ["vehicles"], refetchType: "all" })
+      ]);
+      navigate(`/vistorias/${inspection.id}`);
+    },
     onError: (reason: Error) => setError(reason.message)
   });
 
@@ -131,7 +140,7 @@ export function NewInspection() {
 
       {step === 4 && <div>
         <div className="section-heading"><span className="section-kicker">Conferência final</span><h2>Revisão e resultado</h2><p>O percentual mínimo de aprovação é validado novamente pelo servidor.</p></div>
-        <div className="review-result"><div className="progress-ring" style={{ "--value": `${summary.percentage * 3.6}deg` } as React.CSSProperties}><span>{summary.percentage}%</span></div><div><p>Resultado previsto</p><h3 className={summary.percentage >= 90 ? "approved" : "rejected"}>{summary.percentage >= 90 ? "APROVADO" : "REPROVADO"}</h3><span>{summary.compliant} conformes · {summary.nonCompliant} não conformes · {summary.notApplicable} não aplicáveis</span></div></div>
+        <div className="review-result"><div className="progress-ring" style={{ "--value": `${summary.percentage * 3.6}deg` } as React.CSSProperties}><span>{summary.percentage}%</span></div><div><p>Resultado previsto conforme o parâmetro atual</p><h3 className={settings && summary.percentage >= settings.minimumInspectionCompliance ? "approved" : "rejected"}>{settings ? (summary.percentage >= settings.minimumInspectionCompliance ? "APROVADO" : "REPROVADO") : "VALIDANDO REGRA…"}</h3><span>{summary.compliant} conformes · {summary.nonCompliant} não conformes · {summary.notApplicable} não aplicáveis</span></div></div>
         <div className="review-grid"><div><span>Empresa</span><strong>{label(selectedCompany)}</strong></div><div><span>Projeto</span><strong>{label(selectedProject)}</strong></div><div><span>Veículo</span><strong>{selectedVehicle?.plate} · {selectedVehicle?.model}</strong></div><div><span>Motorista</span><strong>{label(selectedDriver)}</strong></div><div><span>Data e hora</span><strong>{form.inspectionDate} · {form.inspectionTime}</strong></div><div><span>Quilometragem</span><strong>{Number(form.mileage).toLocaleString("pt-BR")} km</strong></div><div><span>Fotos</span><strong>{Object.keys(photos).length} anexada(s)</strong></div><div><span>Não conformidades</span><strong>{summary.nonCompliant}</strong></div></div>
         <Field label="Observações gerais" help="Inclua somente informações relevantes para o relatório final."><textarea rows={5} value={form.generalObservations} onChange={(event) => setForm({ ...form, generalObservations: event.target.value })} placeholder="Informações adicionais sobre a vistoria"/></Field>
       </div>}

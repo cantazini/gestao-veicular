@@ -68,3 +68,60 @@ describe("dependências dos cadastros", () => {
     expect(vehicle.driverIds).toEqual([driver.id]);
   });
 });
+
+describe("Histórico e Reprovações", () => {
+  it("mantém aprovações no Histórico e fora de Reprovações", async () => {
+    const history = await mockRequest<PageResult<import("../types").Inspection>>("/inspections?pageSize=100");
+    const rejected = await mockRequest<PageResult<import("../types").Inspection>>("/inspections?pageSize=100&result=REPROVADO");
+    expect(history.items.some((item) => item.result === "APROVADO")).toBe(true);
+    expect(rejected.items.every((item) => item.result === "REPROVADO")).toBe(true);
+  });
+});
+
+describe("documentos integrados", () => {
+  it.each([["company", "companies"], ["driver", "drivers"], ["vehicle", "vehicles"]] as const)("cria metadata de documento de %s e exibe na central", async (kind, source) => {
+    const entities = await mockRequest<PageResult<Entity>>(`/${source}`);
+    const related = entities.items[0];
+    const created = await mockRequest<{ id: string }>("/files/complete", { method: "POST", body: JSON.stringify({
+      kind: `${kind}-document`, entityId: related.id, blobPath: `mock/${related.id}/arquivo.pdf`, fileName: "arquivo.pdf",
+      mimeType: "application/pdf", size: 1000, documentType: "other", label: `Documento ${kind}`,
+      issueDate: "2026-01-01", expiryDate: "2027-01-01", observation: "Teste"
+    }) });
+    const listed = await mockRequest<import("../types").DocumentRecord[]>(`/documents?entityType=${kind}&entityId=${related.id}`);
+    expect(listed.some((document) => document.id === created.id)).toBe(true);
+
+    await mockRequest(`/documents/${created.id}`, { method: "PUT", body: JSON.stringify({ observation: "Atualizado" }) });
+    const updated = await mockRequest<import("../types").DocumentRecord[]>(`/documents?entityType=${kind}&entityId=${related.id}`);
+    expect(updated.find((document) => document.id === created.id)?.observation).toBe("Atualizado");
+
+    await mockRequest(`/files/${created.id}`, { method: "DELETE" });
+    const removed = await mockRequest<import("../types").DocumentRecord[]>(`/documents?entityType=${kind}&entityId=${related.id}`);
+    expect(removed.some((document) => document.id === created.id)).toBe(false);
+  });
+
+  it("substitui e remove a logo do cliente sem gravar SAS permanente", async () => {
+    const clients = await mockRequest<PageResult<Entity>>("/clients");
+    const client = clients.items[0];
+    await mockRequest("/files/complete", { method: "POST", body: JSON.stringify({ kind: "client-branding", entityId: client.id, blobPath: `clients/${client.id}/branding/logo.png`, fileName: "logo.png", mimeType: "image/png", size: 1000 }) });
+    expect((await mockRequest<PageResult<Entity>>("/clients")).items.find((item) => item.id === client.id)?.logoBlobPath).toBe("/assets/logo-klabin.png");
+    await mockRequest(`/clients/${client.id}/logo`, { method: "DELETE" });
+    expect((await mockRequest<PageResult<Entity>>("/clients")).items.find((item) => item.id === client.id)?.logoBlobPath).toBeNull();
+  });
+});
+
+describe("credenciais com vínculos cadastrados", () => {
+  it("consulta veículo e perfil por ID real, sem usar placa como chave", async () => {
+    const vehicles = await mockRequest<PageResult<Entity>>("/vehicles");
+    const vehicle = vehicles.items[0];
+    const companies = await mockRequest<PageResult<Entity>>("/companies");
+    const company = companies.items.find((item) => item.id === vehicle.companyId)!;
+    const result = await mockRequest<Array<{ vehicleId: string; accessProfileId: string; plate: string }>>(`/credentials/eligibility?clientId=${company.clientId}&companyId=${company.id}&vehicleId=${vehicle.id}&accessProfileId=${vehicle.accessProfileId}`);
+    expect(result[0]).toMatchObject({ vehicleId: vehicle.id, accessProfileId: vehicle.accessProfileId, plate: vehicle.plate });
+  });
+
+  it("não retorna credencial para perfil diferente do vínculo do veículo", async () => {
+    const vehicles = await mockRequest<PageResult<Entity>>("/vehicles");
+    const result = await mockRequest<unknown[]>(`/credentials/eligibility?vehicleId=${vehicles.items[0].id}&accessProfileId=${crypto.randomUUID()}`);
+    expect(result).toEqual([]);
+  });
+});
