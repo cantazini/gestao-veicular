@@ -1,0 +1,60 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userProfile() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function operational() {
+      return signedIn()
+        && userProfile().active == true
+        && userProfile().role in ['admin', 'inspector'];
+    }
+
+    function admin() {
+      return operational() && userProfile().role == 'admin';
+    }
+
+    function validImage(maxBytes) {
+      return request.resource == null || (
+        request.resource.size > 0
+        && request.resource.size <= maxBytes
+        && request.resource.contentType in ['image/jpeg', 'image/png']
+      );
+    }
+
+    function validDocument() {
+      return request.resource == null || (
+        request.resource.size > 0
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType in ['application/pdf', 'image/jpeg', 'image/png']
+      );
+    }
+
+    match /clients/{clientId}/branding/{fileName} {
+      allow read: if operational();
+      allow write: if admin() && validImage(5 * 1024 * 1024);
+    }
+
+    match /documents/{entityType}/{entityId}/{documentId}/{fileName} {
+      allow read: if operational();
+      allow write: if operational()
+        && entityType in ['company', 'driver', 'vehicle']
+        && validDocument();
+    }
+
+    match /inspections/{inspectionId}/photos/{photoId}/{fileName} {
+      allow read: if operational();
+      allow write: if operational() && validImage(10 * 1024 * 1024);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

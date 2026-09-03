@@ -1,340 +1,219 @@
-# Meta Gestão Veicular — Azure
+# Meta Gestão Veicular — Firebase Blaze
 
-Nova versão da aplicação corporativa de gestão e vistoria de veículos. O projeto preserva o fluxo funcional da V2, mas substitui a execução em Firebase/JavaScript puro por React, Azure Functions, Azure SQL e Blob Storage privado.
+Aplicação corporativa React + TypeScript para cadastros, documentos, vistorias, fotos, relatórios, credenciais e exportação XLSX. O Firebase é o provedor principal; a API Azure, o Azure SQL e o Blob Storage continuam no projeto como fallback reversível durante a homologação.
 
-Esta pasta é independente. A V2 original não foi alterada e pode continuar servindo como contingência durante a homologação.
-
-## O que está pronto
-
-- autenticação corporativa pelo Microsoft Entra ID, integrada ao Azure Static Web Apps;
-- perfis internos `admin`, `inspector` e `supplier`;
-- isolamento de fornecedores por `company_id` validado pela API;
-- dashboard, clientes, projetos, empresas, motoristas, veículos, usuários e perfis de acesso;
-- cadastro de clientes com Razão Social, Nome Fantasia, máscara/validação de CNPJ e bloqueio de duplicidade;
-- vínculos progressivos entre cliente, projeto, empresa, veículo, motorista e vistoria, validados também pela API;
-- documentos privados com URLs SAS curtas;
-- documentos anexados diretamente nos cadastros de Empresa, Motorista e Veículo, com Central de Documentos, emissão, validade, observação e status calculado;
-- checklist oficial com 39 itens, divididos em 10 + 12 + 9 + 8;
-- cálculo de conformidade e resultado repetido no servidor;
-- código sequencial por veículo e snapshots históricos;
-- até oito posições fotográficas, com redução da imagem no navegador;
-- histórico, reprovações e relatório profissional para impressão A4/PDF;
-- filtros de Histórico executados no backend e Reprovações restrita ao resultado persistido `REPROVADO`;
-- registro fotográfico com três imagens por linha na impressão;
-- credenciais veiculares individuais ou em lote;
-- credenciais por seleção progressiva Cliente → Empresa → Veículo → Perfil de Acesso, usando os IDs reais dos cadastros;
-- exportação XLSX achatada para Excel e Power BI;
-- importação XLSX em massa com modelo, pré-visualização, validação de vínculos e confirmação;
-- scripts SQL, migração controlada e workflow de implantação.
+> Estado desta cópia: a arquitetura e o código Firebase estão preparados e testados localmente. A publicação depende das configurações manuais descritas abaixo: nome exato do bucket adicional de São Paulo, primeiro Admin, targets de Storage, identidade do GitHub Actions e autenticação/permissão da Firebase CLI.
 
 ## Arquitetura
 
 ```text
-Navegador
-  React + Vite + TypeScript
-          │ HTTPS /api
-          ▼
-Azure Static Web Apps + Microsoft Entra ID
-          │ x-ms-client-principal
-          ▼
-Azure Functions (Node.js + TypeScript)
-       ├── Azure SQL: dados relacionais, snapshots e auditoria
-       └── Blob Storage privado: fotos, documentos e logos de clientes
+React + Vite + TypeScript
+        │
+        ├── Firebase Authentication (e-mail/senha)
+        ├── Cloud Firestore (dados e metadados)
+        ├── Cloud Storage adicional em São Paulo (arquivos privados)
+        └── Callable Cloud Functions 2nd gen / Node 22 / southamerica-east1
+                ├── validação e relacionamentos
+                ├── unicidade transacional
+                ├── conclusão/edição de vistorias
+                ├── usuários, configurações e importação
+                └── aprovação/emissão de credenciais + auditoria
+
+Fallback: VITE_DATA_BACKEND=azure + VITE_AUTH_PROVIDER=azure
+        └── Azure Static Web Apps + Functions + SQL + Blob privado
 ```
 
-O navegador nunca recebe senha do SQL, chave do Storage ou cadeia de conexão. Uploads usam uma URL SAS de escrita válida por 10 minutos. Downloads usam uma URL SAS de leitura válida por 5 minutos.
+O React nunca recebe credenciais administrativas. A configuração `VITE_FIREBASE_*` identifica o Firebase Web App, mas não concede privilégios de Admin. A segurança efetiva é formada por Authentication, Rules e autorização nas Functions.
 
-Nesta fase, a API é a Azure Functions gerenciada pelo Static Web Apps no plano Free. Por isso, SQL e Blob são acessados por connection strings mantidas exclusivamente nas **Application Settings do backend**. Elas não usam o prefixo `VITE_`, não são incluídas no build React e não podem ser versionadas.
-
-## Estrutura de pastas
+## O que cada área faz
 
 ```text
-src/                         interface React
-  auth/                      sessão do usuário
-  components/                layout e componentes reutilizáveis
-  data/                      definição do checklist oficial
-  lib/                       API, imagens, formatação, importação e mock local
-  pages/                     telas do sistema
-api/                         Azure Functions
-  src/functions/             rotas HTTP
-  src/middleware/            autenticação e tratamento de erros
-  src/repositories/          consultas parametrizadas ao SQL
-  src/services/              SQL, Blob e regras do checklist
-database/                    criação do banco e modelos auxiliares
-migration/                   ferramentas isoladas da migração Firebase → Azure
-public/assets/               logos fornecidas para a aplicação
-.github/workflows/           CI/CD do Static Web Apps
-staticwebapp.config.json      rotas, autenticação e cabeçalhos de segurança
+src/firebase/config.ts       inicialização central do SDK Web, bucket e App Check
+src/auth/AuthContext.tsx     sessão, persistência, login, logout e redefinição de senha
+src/lib/api.ts               fachada única; seleciona Firebase ou fallback Azure
+src/lib/firebaseApi.ts       adapter Firestore/Functions compatível com as telas atuais
+src/lib/files.ts             upload direto e privado para Storage + metadados Firestore
+src/pages/                   telas existentes, relatório, edição e credenciais
+functions/src/               operações confiáveis no backend Firebase
+functions/scripts/           bootstrap opcional, sem senha ou chave versionada
+firestore.rules              autorização Firestore, deny by default
+storage.rules                regras do bucket da aplicação
+storage.default.rules        bloqueio total do bucket default US-EAST1
+firestore.indexes.json       índices compostos utilizados pelas consultas
+firebase.json                Hosting, Functions, Firestore e dois targets de Storage
+.firebaserc                  projeto Firebase autorizado
+.github/workflows/           deploy Firebase e fallback Azure manual
+api/, database/              backend e modelo Azure preservados
 ```
 
-## Recursos Azure já definidos
+Detalhes técnicos da migração estão em [docs/FIREBASE_MIGRATION.md](docs/FIREBASE_MIGRATION.md). A contingência Azure está em [docs/AZURE_FALLBACK.md](docs/AZURE_FALLBACK.md).
 
-O projeto foi preparado somente para os recursos informados:
+## Pré-requisitos
 
-- Resource Group: `rg-meta-gestao-veicular`
-- Região: `Brazil South`
-- SQL Server: `sql-meta-gestao-veicular`
-- Banco: `sqldb-meta-gestao-veicular`
-- Storage Account: `stmetacsgestaoveicular`
-- Container privado: `appfiles`
-- Static Web App: `swa-meta-gestao-veicular`
-- Repositório: `gestao-veicular`
-- Branch: `main`
+- Node.js 22;
+- pnpm 11;
+- acesso ao projeto Firebase `gestaoveicular-47777`;
+- plano Blaze ativo;
+- Firebase CLI para configuração/deploy;
+- um Web App Firebase já existente — não crie outro;
+- bucket adicional do Cloud Storage localizado em São Paulo.
 
-Nenhum recurso novo é criado pelo código.
+O ambiente de validação desta tarefa possuía Node 24, por isso os comandos exibem apenas um aviso de `engines`; o CI e o runtime estão fixados em Node 22.
 
-## Primeira execução local — modo de demonstração
+## 1. Preparar o Firebase Console
 
-Este modo não acessa Azure, Firebase ou dados reais. Os registros de demonstração ficam apenas na memória do navegador e desaparecem ao reiniciar o servidor.
+### Authentication
 
-1. Instale Node.js 22 e pnpm 11.
-2. Abra um terminal nesta pasta.
-3. Execute:
+1. Abra [Firebase Console](https://console.firebase.google.com/) e selecione `gestaoveicular-47777`.
+2. Acesse **Build → Authentication → Sign-in method**.
+3. Habilite **E-mail/senha**; não habilite cadastro público na interface da aplicação.
+4. Em **Settings → Authorized domains**, confirme os domínios padrão do Firebase Hosting depois do primeiro deploy.
 
-   ```bash
-   pnpm install
-   ```
+### Firestore
 
+1. Acesse **Build → Firestore Database**.
+2. Confirme o banco `(default)` no modo **Standard** e na localização `southamerica-east1`.
+3. Não escolha regras de teste. As regras versionadas deste projeto começam negando tudo.
+
+### Storage
+
+1. Acesse **Build → Storage** e liste os buckets.
+2. Copie o nome exato do bucket adicional localizado em São Paulo. Não suponha o sufixo.
+3. Mantenha o bucket default em US-EAST1 fechado e sem arquivos da aplicação.
+4. Não torne nenhum bucket público.
+
+O upload usa o Firebase Storage SDK. Não é necessário criar CORS manual para o funcionamento normal do SDK. Se no futuro existir integração HTTP fora do SDK, permita somente as origens e métodos realmente usados.
+
+## 2. Configurar o Web App local
+
+1. No Console, abra **Project settings → General → Your apps**.
+2. Selecione o Web App que já existe.
+3. Em **SDK setup and configuration**, escolha **Config**.
 4. Copie `.env.example` para `.env.local`.
-5. No arquivo `.env.local`, use explicitamente:
+5. Preencha somente as variáveis `VITE_FIREBASE_*` com a configuração exibida e o nome exato do bucket adicional.
 
-   ```env
-   VITE_DEV_AUTH=true
-   VITE_DEV_API=true
-   ```
-
-6. Execute:
-
-   ```bash
-   pnpm dev
-   ```
-
-7. Abra `http://127.0.0.1:5173`.
-
-O mock só é aceito quando `import.meta.env.DEV` é verdadeiro **e** as duas variáveis acima estão habilitadas. Um build de produção não possui essa porta de entrada.
-
-## Executar localmente com a API real
-
-1. Instale Azure Functions Core Tools 4 e tenha acesso ao SQL/Storage de desenvolvimento.
-2. Copie `api/local.settings.example.json` para `api/local.settings.json`.
-3. Substitua os marcadores de `SQL_CONNECTION_STRING` e `AZURE_STORAGE_CONNECTION_STRING` por valores do ambiente de desenvolvimento. Se usar Azurite, substitua também o marcador de `AzureWebJobsStorage` por `UseDevelopmentStorage=true`.
-4. Não versione esse arquivo: ele já está no `.gitignore` e deve permanecer apenas na máquina do desenvolvedor.
-5. Para autenticação local explícita, configure no arquivo:
-
-   ```json
-   "AZURE_FUNCTIONS_ENVIRONMENT": "Development",
-   "DEV_AUTH": "true",
-   "DEV_AUTH_USER_ID": "local-admin",
-   "DEV_AUTH_EMAIL": "seu-email-corporativo@empresa.com"
-   ```
-
-6. O `identity_provider_id` informado precisa existir em `dbo.app_users`.
-7. Na raiz, deixe `VITE_DEV_AUTH=false` e `VITE_DEV_API=false`.
-8. Em dois terminais, execute:
-
-   ```bash
-   cd api
-   func start
-   ```
-
-   ```bash
-   pnpm dev
-   ```
-
-O modo `DEV_AUTH` da API falha se o ambiente não for `Development` ou se a chamada não vier de `localhost`/`127.0.0.1`.
-
-## Preparar o Azure SQL
-
-1. No portal Azure, confirme um administrador do servidor SQL para `sql-meta-gestao-veicular`.
-2. Conecte ao banco `sqldb-meta-gestao-veicular` usando essa conta administrativa.
-3. Execute [database/001_schema.sql](database/001_schema.sql).
-4. Execute [database/003_clients_unique_cnpj.sql](database/003_clients_unique_cnpj.sql). A migração interrompe com uma mensagem clara se já houver CNPJs duplicados; nesse caso, saneie os registros antes de executá-la novamente.
-5. Execute [database/004_document_metadata.sql](database/004_document_metadata.sql). Essa migration é idempotente e adiciona somente `issue_date` e `observation` às tabelas `company_documents`, `driver_documents` e `vehicle_documents`.
-6. Crie um usuário SQL contido e exclusivo para a API, com senha forte gerada fora do repositório. Não use a conta administrativa na aplicação:
-
-   ```sql
-   CREATE USER [meta_gestao_api] WITH PASSWORD = '<SENHA_FORTE_FORA_DO_GIT>';
-   ALTER ROLE db_datareader ADD MEMBER [meta_gestao_api];
-   ALTER ROLE db_datawriter ADD MEMBER [meta_gestao_api];
-   ```
-
-7. Monte `SQL_CONNECTION_STRING` com esse usuário, apontando diretamente para o banco da aplicação:
-
-   ```text
-   Server=tcp:sql-meta-gestao-veicular.database.windows.net,1433;Initial Catalog=sqldb-meta-gestao-veicular;Persist Security Info=False;User ID=meta_gestao_api;Password=<SENHA_REAL>;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
-   ```
-
-8. Cadastre a string somente nas Application Settings do backend, conforme a seção abaixo.
-9. Crie o primeiro perfil interno usando [database/002_first_admin.template.sql](database/002_first_admin.template.sql). Substitua apenas os marcadores; o arquivo não contém credenciais.
-
-`database/test_data.local.sql` é exclusivamente demonstrativo. Não execute em produção.
-
-## Preparar o Blob Storage
-
-1. Confirme que o container `appfiles` está com nível de acesso **Private**.
-2. Na conta `stmetacsgestaoveicular`, abra **Security + networking → Access keys** e copie uma connection string.
-3. Cadastre-a somente como `AZURE_STORAGE_CONNECTION_STRING` nas Application Settings do backend.
-4. Não torne o container público, não crie SAS permanente e não coloque chave/connection string no React, GitHub, workflow ou qualquer arquivo versionado.
-5. Se uma chave for exposta, rotacione-a no Storage Account e atualize imediatamente a Application Setting.
-
-Caminhos usados:
-
-```text
-clients/{clientId}/branding/{uuid}.png
-companies/{companyId}/documents/{uuid}.pdf
-drivers/{driverId}/documents/{uuid}.pdf
-vehicles/{vehicleId}/documents/{uuid}.pdf
-inspections/{inspectionId}/photos/{uuid}.jpg
+```env
+VITE_DATA_BACKEND=firebase
+VITE_AUTH_PROVIDER=firebase
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=gestaoveicular-47777
+VITE_FIREBASE_STORAGE_BUCKET=BUCKET_ADICIONAL_DE_SAO_PAULO
+VITE_FIREBASE_MESSAGING_SENDER_ID=...
+VITE_FIREBASE_APP_ID=...
+VITE_FIREBASE_APPCHECK_SITE_KEY=
 ```
 
-### CORS do Blob Storage
+`.env.local` já está ignorado. Não coloque service account, private key, senha, token ou connection string em variáveis `VITE_*`.
 
-O upload é feito diretamente pelo navegador para uma SAS temporária. Configure uma regra CORS somente para o serviço **Blob**:
+## 3. Instalar e executar
 
-1. abra `stmetacsgestaoveicular` no Portal Azure;
-2. acesse **Settings → Resource sharing (CORS)**;
-3. na aba **Blob service**, adicione uma regra com:
-
-   | Campo | Valor |
-   | --- | --- |
-   | Allowed origins | `https://<DOMINIO-PADRAO-DO-SWA>` |
-   | Allowed methods | `GET`, `HEAD`, `PUT` |
-   | Allowed headers | `content-type,x-ms-blob-type` |
-   | Exposed headers | `etag,x-ms-request-id` |
-   | Max age | `3600` |
-
-4. copie o domínio exato exibido em **swa-meta-gestao-veicular → Overview → URL**; não inclua barra final;
-5. adicione uma regra/origem explícita para cada domínio personalizado ou ambiente de homologação que realmente fará upload;
-6. salve e teste um upload. Não use `*` em produção.
-
-CORS não concede acesso aos blobs: a autorização continua dependendo da SAS curta gerada pela API, e o container permanece privado.
-
-## Configurações do Static Web Apps
-
-No Portal Azure, abra **swa-meta-gestao-veicular → Settings → Environment variables** (Application Settings do backend). Cadastre exatamente:
-
-```text
-SQL_CONNECTION_STRING=<CONNECTION_STRING_COMPLETA_DO_AZURE_SQL>
-AZURE_STORAGE_CONNECTION_STRING=<CONNECTION_STRING_COMPLETA_DA_STORAGE_ACCOUNT>
-AZURE_STORAGE_CONTAINER=appfiles
-DEV_AUTH=false
+```bash
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
-Esses quatro valores são configurações da API. Não os duplique em `.env`, `.env.local`, variáveis `VITE_*`, código React, GitHub Actions ou secrets usados no build do frontend. Configure-os no ambiente de produção e em cada ambiente de homologação que precisar acessar SQL/Blob, usando credenciais próprias quando possível. Após salvar, reinicie/reimplante a aplicação e faça um teste de saúde e upload.
+Abra `http://127.0.0.1:5173`. Sem uma conta Auth e um documento `users/{uid}` ativo, o login será corretamente negado.
 
-O arquivo `staticwebapp.config.json` protege `/api/*`, mantém o login visível e aplica CSP, proteção contra iframe e políticas de conteúdo.
+### Modo de demonstração isolado
 
-O login usa `/.auth/login/aad`. Depois que o Entra autentica a identidade, a API procura o usuário em `dbo.app_users`; uma conta corporativa sem perfil interno recebe acesso negado.
+Para validar apenas a interface sem Firebase, use em `.env.local`:
 
-## Implantação pelo GitHub
+```env
+VITE_DEV_AUTH=true
+VITE_DEV_API=true
+```
 
-O workflow está em `.github/workflows/azure-static-web-apps.yml` e executa instalação, testes e build antes do deploy.
+Esse modo só funciona com `pnpm dev`. Builds de produção não ativam o mock.
 
-Como esta cópia de trabalho não continha a pasta `.git` nem um workflow anterior, não foi possível preservar o nome exato do secret gerado pelo portal. Antes do primeiro push:
+## 4. Configurar os targets dos buckets
 
-1. abra o workflow que já existe no repositório `gestao-veicular`;
-2. compare o nome do secret de token;
-3. mantenha o secret existente ou ajuste `AZURE_STATIC_WEB_APPS_API_TOKEN` para esse nome;
-4. copie estes arquivos para o repositório;
-5. abra um Pull Request para `main`;
-6. valide o ambiente de preview;
-7. faça o merge somente depois da homologação.
+Esta etapa é propositalmente obrigatória. Sem ela, o deploy de Storage falha com segurança, evitando aplicar regras no bucket errado.
 
-Não há credencial no workflow incluído.
+1. Autentique a CLI:
 
-## Fotos e documentos
+   ```bash
+   firebase login
+   firebase use gestaoveicular-47777
+   ```
 
-Fotografias são preparadas no navegador com dimensão máxima de 1920 px e qualidade JPEG de 82%. O original nunca é salvo em `localStorage`. No Azure:
+2. Associe o target `app` ao nome exato do bucket adicional de São Paulo:
 
-1. a API valida permissão, tipo e tamanho;
-2. gera uma SAS curta para um caminho controlado;
-3. o navegador envia o arquivo diretamente ao container privado;
-4. a API confirma metadados no SQL;
-5. relatórios recebem apenas uma URL temporária de leitura.
+   ```bash
+   firebase target:apply storage app NOME_EXATO_BUCKET_SAO_PAULO
+   ```
 
-Documentos aceitos: PDF, JPG/JPEG e PNG, até 10 MB. A API confere MIME type, extensão e coerência entre ambos. Fotos: JPG ou PNG, até 20 MB antes da redução. Logos de clientes: JPG ou PNG, até 5 MB.
+3. Associe `default-deny` ao bucket default de US-EAST1:
 
-### Fluxo de documentos
+   ```bash
+   firebase target:apply storage default-deny NOME_EXATO_BUCKET_DEFAULT
+   ```
 
-Nos formulários **Nova/Editar Empresa**, **Novo/Editar Motorista** e **Novo/Editar Veículo**, a seção **Documentos** permite informar tipo, emissão, validade, observação e arquivo. Em um novo cadastro, o sistema salva primeiro a entidade para obter seu `uniqueidentifier` real e depois envia os anexos. Se um arquivo falhar, a entidade continua salva e a tela informa exatamente qual anexo precisa ser tentado novamente.
+4. Confira a seção `targets` gerada em `.firebaserc`. Nomes de bucket não são secrets e essa associação deve ser versionada depois de revisada.
+5. Nunca troque `storage.rules` por regras públicas para “fazer funcionar”.
 
-Na edição, os documentos existentes podem ser abertos, substituídos, removidos ou ter seus metadados atualizados sem recriar a entidade. A tela **Central de Documentos** reúne as três categorias e oferece filtros por cliente, empresa, tipo, categoria e status:
+## 5. Primeiro Administrador
 
-- **Válido**: sem vencimento ou fora da janela de alerta;
-- **Próximo do vencimento**: dentro de `expiry_alert_days`;
-- **Vencido**: validade anterior à data atual.
+Não existe bootstrap público. Faça uma única vez:
 
-O status é calculado na consulta a partir da validade e da configuração atual; ele não é duplicado como texto estático no banco.
+1. Em **Authentication → Users**, clique em **Add user**.
+2. Informe o e-mail real do primeiro administrador.
+3. Gere uma senha aleatória forte e descartável em um gerenciador; não a envie nem a registre no repositório.
+4. Copie o **User UID** criado.
+5. Em **Firestore Database**, crie a coleção `users` e um documento cujo ID seja exatamente esse UID.
+6. Adicione os campos:
 
-## Clientes e identidade visual
+   | Campo | Tipo | Valor |
+   | --- | --- | --- |
+   | `name` | string | nome do administrador |
+   | `email` | string | mesmo e-mail do Auth |
+   | `role` | string | `admin` |
+   | `active` | boolean | `true` |
 
-A marca Meta é global e usa a nova logo branca fornecida no login/menu. Cada Cliente possui sua própria logo, enviada no cadastro em PNG/JPG para o Blob privado; o SQL guarda somente o caminho permanente do blob, nunca uma SAS. O relatório consulta a rota autenticada `/api/clients/{id}/logo`, que redireciona para uma SAS curta somente no momento da leitura.
+7. Na tela de login, use **Esqueci minha senha** para definir uma senha conhecida somente pelo titular.
+8. Entre e crie os demais usuários em **Administração → Usuários**. Eles também podem definir a senha pelo fluxo de redefinição.
 
-Para a operação atual, o arquivo Klabin fornecido está em `public/assets/logo-klabin.png` e é usado como fallback temporário somente quando o cliente se chama exatamente **Klabin**. Outros clientes sem logo continuam com o relatório íntegro e sem imagem quebrada. Uma logo cadastrada no Blob sempre tem prioridade. Esse fallback pode ser removido depois que a logo Klabin estiver confirmada no cadastro de produção.
+Existe um bootstrap opcional em `functions/scripts/bootstrap.mjs` para settings, tipos documentais e perfil inicial. Ele requer Application Default Credentials e variáveis `FIREBASE_ADMIN_UID`, `FIREBASE_ADMIN_EMAIL` e `FIREBASE_ADMIN_NAME`; não recebe senha e se recusa a executar em outro projeto.
 
-No cadastro de Cliente é possível selecionar, substituir ou remover a logo. A substituição atualiza o caminho SQL e tenta limpar o blob anterior; a remoção limpa o caminho e elimina o arquivo. O container permanece privado.
+## 6. Dados iniciais sem dados fictícios
 
-## Experiência da interface e autenticação
+O documento `systemSettings/default` pode ser criado pelo script:
 
-A interface possui um design system leve em CSS puro, sem biblioteca visual adicional. O arquivo `src/product.css` concentra a camada mais recente de refinamento: superfícies, estados de interação, login, modal, navegação e jornada guiada de vistoria. Os estilos anteriores continuam separados para reduzir risco de regressão e facilitar a comparação durante a homologação.
+```bash
+set GOOGLE_CLOUD_PROJECT=gestaoveicular-47777
+pnpm --dir functions bootstrap
+```
 
-- o menu mantém expansão e modo compacto no navegador, abre automaticamente o grupo da rota atual e marca somente a opção correta;
-- o relatório de uma vistoria pertence ao item **Histórico**, enquanto `/vistorias/nova` pertence exclusivamente a **Nova vistoria**;
-- modais mantêm cabeçalho e ações visíveis, com rolagem apenas na área de campos, fechamento por `Esc` e adaptação para tablet/celular;
-- formulários exibem campos obrigatórios, agrupamentos, máscaras de CNPJ/telefone, ajuda contextual e múltipla seleção por caixas marcáveis;
-- a nova vistoria orienta a dependência **Empresa → Projeto → Veículo → Motorista** e explica por que uma opção ainda está bloqueada;
-- o Histórico consulta todas as vistorias concluídas e envia período, cliente, empresa, projeto, veículo, motorista, placa e resultado para a API;
-- Reprovações sempre envia `result=REPROVADO` ao backend. A consulta SQL usa `inspections.result`, persistido pela regra única do servidor;
-- caches de entidades são atualizados por prefixo e invalidados após POST/PUT, incluindo opções de vistoria, documentos e credenciais; um cadastro novo aparece nas telas dependentes sem F5.
+No Linux/macOS use `export` no lugar de `set`. Se não houver Application Default Credentials, crie manualmente o documento com:
 
-O login foi redesenhado, mas o método de autenticação não mudou: o botão **Continuar com Microsoft** encaminha para `/.auth/login/aad` com retorno explícito `/?auth=callback`. No retorno, a aplicação consulta primeiro `/.auth/me`, mostra **Validando sua sessão…** e só então consulta `/api/auth/me`. Há poucas tentativas com espera curta apenas para um `401` transitório de propagação da sessão; erros `403` de usuário sem `app_user` ou usuário inativo são mostrados e não entram em loop. Não existem campos locais de usuário ou senha. Com o SSO, a senha permanece somente no Microsoft Entra ID.
+- `minimumInspectionCompliance`: `90`;
+- `maximumFleetAge`: `12`;
+- `expiryAlertDays`: `30`;
+- `credentialMaximumDays`: `365`;
+- `allowProvisionalLicense`: `false`;
+- `blockVehicleForAnyIrregularDriver`: `false`;
+- `documentRequirements`: array vazio;
+- `credentialDimensions`: array vazio.
 
-### O que é o perfil de circulação e acesso
+Esses são parâmetros, não registros operacionais de demonstração.
 
-O campo exibido no veículo como **Perfil de circulação e acesso** corresponde a `dbo.access_profiles`. Ele não é decorativo:
+## 7. Fluxos principais
 
-1. `dbo.vehicles.access_profile_id` é uma chave estrangeira `uniqueidentifier NOT NULL`;
-2. um perfil pode ser global (`client_id` vazio) ou específico de um cliente;
-3. o perfil reúne portarias e áreas autorizadas nas tabelas `access_profile_gates` e `access_profile_areas`;
-4. seu nome participa da análise de elegibilidade de credenciais;
-5. seus dados são copiados para o snapshot da vistoria, preservando o histórico mesmo que a configuração mude depois.
+- **Cadastros:** Functions validam campos, CNPJ, placa, IDs Firestore e vínculos reais.
+- **Unicidade:** `uniqueKeys` impede CNPJ duplicado entre Cliente/Empresa, placa global, código de projeto por Cliente e matrícula por Empresa.
+- **Relacionamentos:** assignments preservam histórico com `active`/`endedAt`; as entidades mantêm campos denormalizados necessários à UI.
+- **Documentos:** upload privado direto, metadata central, status de validade calculado, substituição e inativação.
+- **Vistorias:** 39 itens oficiais, horário `HH:mm`, data `YYYY-MM-DD`, resultado oficial na Function, snapshots e auditoria.
+- **Edição:** Admin/Fiscalizador podem revisar uma vistoria concluída; score/resultado são recalculados e aprovações anteriores são invalidadas.
+- **Fotos:** oito posições sugeridas e fotos adicionais dinâmicas; novas fotos podem ser anexadas em uma revisão.
+- **Credenciais:** vistoria aprovada não libera credencial. O fluxo é solicitação → análise do Fiscalizador/Admin → emissão persistida → impressão.
+- **Relatórios:** impressão A4/PDF pelo navegador, checklist, não conformidades, fotos e logos dinâmicas.
+- **Importação:** preview local; cada gravação passa novamente pela Function e pelas mesmas validações de unicidade/relacionamento. A Function `bulkImport` aceita lotes de até 200 linhas para evolução controlada.
+- **Exportação:** XLSX achatado continua disponível para Excel/Power BI.
 
-Por isso, o campo continua obrigatório. Administradores gerenciam sua origem em **Administração → Perfis de circulação e acesso**. Ao cadastrar um veículo, a lista mostra perfis globais ou pertencentes ao mesmo cliente da empresa selecionada. Se não houver opção compatível, a tela apresenta uma orientação e, para administradores, um link direto para essa configuração.
+## 8. Testes e build
 
-### Como gerar uma credencial
-
-1. abra **Credenciais**;
-2. selecione Cliente, Empresa, Veículo/Placa e Perfil de Acesso nessa ordem;
-3. a tela envia `client.id`, `company.id`, `vehicle.id` e `accessProfile.id` para `/api/credentials/eligibility`;
-4. a API confere CNH, idade da frota, documentos obrigatórios, vínculos e regras do sistema;
-5. clique em **Gerar credencial** e depois em **Imprimir / Salvar PDF**.
-
-A placa é apenas o texto exibido; a chave do relacionamento continua sendo `vehicle.id`. O perfil vem de `dbo.access_profiles` e precisa ser o perfil já associado ao veículo. A credencial inclui as marcas Meta e Cliente quando disponíveis, empresa, motorista, veículo, perfil, validade e código identificador.
-
-## Relatórios e PDF
-
-Abra **Histórico → Relatório → Imprimir / Salvar PDF**. O navegador mostra sua janela de impressão. Escolha **Salvar como PDF**.
-
-Os estilos incluem `@page { size: A4 }`, removem navegação/botões, evitam cortes nos cards e criam uma página separada para o registro fotográfico.
-
-## Importação de cadastros por XLSX
-
-A importação está disponível para administradores em **Administração → Importar dados**.
-
-1. clique em **Baixar modelo XLSX**;
-2. mantenha os nomes das abas e dos cabeçalhos;
-3. preencha as abas na ordem lógica indicada em `Instrucoes`;
-4. use datas no formato `AAAA-MM-DD` e separe listas por ponto e vírgula;
-5. selecione a planilha e clique em **Analisar planilha**;
-6. confira a pré-visualização. Esta etapa não grava nenhum registro;
-7. corrija as linhas marcadas como pendentes ou confirme a importação das linhas válidas;
-8. confira o resultado individual de cada linha.
-
-O arquivo pode conter Clientes, Projetos, Empresas, Perfis de Acesso, Motoristas e Veículos. As referências usam CNPJ, código, nome do perfil e matrícula para localizar os IDs corretos. Durante a gravação, a tela chama os mesmos endpoints dos cadastros individuais; portanto, permissões, validações, duplicidades e vínculos continuam sendo conferidos pela API. Uma falha em uma linha é exibida sem ocultar o resultado das demais.
-
-O limite atual do arquivo é 10 MB. O modelo não contém credenciais nem dados fictícios permanentes.
-
-## Testes e verificação
+Os testes automatizados usam dados locais/mocks e não escrevem no Firebase real.
 
 ```bash
 pnpm typecheck
@@ -342,49 +221,84 @@ pnpm test:all
 pnpm build:all
 ```
 
-Testes atuais cobrem autenticação e callback Entra, usuário não autenticado/sem perfil/inativo, GUID SQL Server, horário de vistoria, transação/rollback, regra única de aprovação, separação Histórico/Reprovações, atualização de cache, checklist oficial, Blob/SAS, validação de arquivos, logo do cliente, documentos das três entidades, filtros da Central, credenciais por IDs reais, CRUD/duplicidade de clientes, dependências dos cadastros e importação XLSX.
+Não há script `lint` nesta base. TypeScript strict, Vitest e o build Vite/Functions são os gates existentes.
 
-Checklist manual recomendado:
+## 9. Deploy manual
 
-1. entrar com administrador, fiscalizador e fornecedor;
-2. confirmar que o fornecedor enxerga apenas sua empresa;
-3. cadastrar cada entidade e editar o registro;
-4. anexar, abrir, editar, substituir e remover um documento em Empresa, Motorista e Veículo; confirmar que ele também aparece na Central;
-5. criar vistoria sem fotos;
-6. criar vistoria com fotos e substituir/remover antes de salvar;
-7. abrir relatório e conferir snapshots, checklist e fotos;
-8. usar a visualização de impressão A4 e salvar PDF;
-9. exportar XLSX e abrir no Excel/Power BI;
-10. baixar o modelo de importação, analisar uma planilha com linhas válidas e inválidas e confirmar somente as válidas;
-11. navegar repetidamente entre Dashboard, Clientes, Empresas, Veículos e Vistorias sem recarregar a página;
-12. recolher/expandir o menu e testar a gaveta em largura de tablet;
-13. verificar o console do navegador e logs da Function.
+Somente depois de configurar os dois targets de Storage e executar os três comandos acima:
 
-### Passos obrigatórios antes do próximo deploy
+```bash
+firebase use gestaoveicular-47777
+firebase deploy --only firestore --project gestaoveicular-47777
+firebase deploy --only storage --project gestaoveicular-47777
+firebase deploy --only functions --project gestaoveicular-47777
+firebase deploy --only hosting --project gestaoveicular-47777
+```
 
-1. execute `database/004_document_metadata.sql` no banco de homologação e depois no banco de produção pela rotina aprovada;
-2. confirme o container `appfiles` como **Private**;
-3. confira o CORS do Blob para o domínio exato do Static Web App, conforme a tabela deste README;
-4. mantenha as quatro Application Settings já existentes (`SQL_CONNECTION_STRING`, `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER=appfiles`, `DEV_AUTH=false`);
-5. no sistema, abra **Clientes → Editar Klabin**, envie a logo anexada e salve; depois valide o relatório de uma vistoria;
-6. homologue o login em uma janela anônima, um usuário autorizado, um usuário sem `app_user` e um usuário inativo;
-7. execute os três comandos automatizados acima e repita o checklist manual no ambiente de preview.
+Ou, após validar cada parte:
 
-## Migração da V2
+```bash
+pnpm firebase:deploy
+```
 
-Leia [MIGRATION_FIREBASE_TO_AZURE.md](MIGRATION_FIREBASE_TO_AZURE.md) antes de manipular dados reais. A migração usa exportação imutável, IDs determinísticos, tabela de rastreio, cópia dos arquivos e consultas de reconciliação. Ela não apaga dados do Firebase.
+O Hosting publica `dist`, reescreve rotas da SPA para `index.html`, não cacheia agressivamente o HTML e aplica cache imutável aos assets com hash.
 
-## Segurança e próximos passos
+## 10. GitHub Actions
 
-- revisar políticas de retenção e backup do SQL/Blob;
-- restringir o Entra ao grupo corporativo autorizado;
-- ativar alertas e monitoramento no Azure;
-- aplicar regras de rede compatíveis com o plano do Static Web Apps;
-- executar teste de restauração antes do corte definitivo;
-- remover o acesso à V2 somente após aceite formal e período de contingência.
+O workflow `.github/workflows/firebase-deploy.yml` executa install, typecheck, todos os testes e `build:all` antes do deploy. Ele usa Workload Identity Federation, sem JSON de service account no repositório.
 
-A possibilidade de login próprio por usuário e senha foi analisada, mas **não foi implementada nesta versão**. O Entra ID e todas as proteções atuais permanecem inalterados. A arquitetura de sessão HttpOnly, controles de senha, fases de homologação e rollback estão documentados em [docs/AUTH_MIGRATION_PROPOSAL.md](docs/AUTH_MIGRATION_PROPOSAL.md). Qualquer implementação futura deverá começar em modo híbrido e somente substituir o Entra após testes e aceite específicos.
+Configure no environment/repositório GitHub:
 
-Managed Identity pode substituir essas credenciais futuramente se a API migrar para uma **Function App dedicada** e for integrada ao Static Web Apps em um plano compatível com backend próprio. Até essa mudança arquitetural, não ative nem conceda identidade do Static Web App para acesso a SQL ou Blob.
+### Secrets
 
-Nunca versione `.env.local`, `api/local.settings.json`, exports da migração, tokens, chaves ou senhas.
+- `VITE_FIREBASE_API_KEY`
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- `GCP_SERVICE_ACCOUNT`
+
+### Variables
+
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+- `VITE_FIREBASE_APPCHECK_SITE_KEY` (deixe vazio enquanto App Check não for configurado)
+
+No Google Cloud IAM, a identidade federada deve poder personificar uma service account de deploy com somente as permissões necessárias para Hosting, Firestore Rules/Indexes, Storage Rules e Functions do projeto.
+
+O workflow Azure continua em `.github/workflows/azure-static-web-apps.yml`, mas agora só executa manualmente por `workflow_dispatch`. Seu secret `AZURE_STATIC_WEB_APPS_API_TOKEN` e os parâmetros originais de deploy foram preservados.
+
+## 11. App Check
+
+O código está preparado para reCAPTCHA Enterprise quando `VITE_FIREBASE_APPCHECK_SITE_KEY` estiver preenchida em produção. `enforceAppCheck` permanece desabilitado nas Functions para não bloquear o primeiro deploy.
+
+Sequência segura:
+
+1. publique e valide Auth, Rules, Functions e Storage;
+2. crie uma chave reCAPTCHA Enterprise para os domínios do Hosting;
+3. preencha a variável;
+4. observe métricas App Check;
+5. somente depois habilite enforcement no Console e altere `enforceAppCheck` para `true` nas Functions.
+
+## 12. Segurança e custos
+
+- Rules começam com negação e não usam acesso público.
+- `users/{uid}` é a fonte de verdade de role e estado ativo.
+- operações críticas passam por Functions/Admin SDK e geram `auditLogs`.
+- fotos, documentos e logos ficam em bucket privado.
+- uploads com metadata inválida tentam limpar o objeto recém-enviado.
+- listas possuem limite; dashboard usa agregações de contagem.
+- não há listeners globais nem leitura em tempo real de coleções grandes.
+- não há secret novo versionado.
+
+## 13. Fallback Azure
+
+Para voltar temporariamente ao Azure, gere o frontend com:
+
+```env
+VITE_DATA_BACKEND=azure
+VITE_AUTH_PROVIDER=azure
+```
+
+Depois execute manualmente o workflow **Azure Static Web Apps CI/CD**. A pasta `api`, migrations SQL, `staticwebapp.config.json`, SAS/Blob e Application Settings não foram removidos nem modificados pela migração funcional Firebase.
+
+Nunca versione `.env.local`, `api/local.settings.json`, credenciais Google, service account JSON, tokens, connection strings, exports ou senhas.

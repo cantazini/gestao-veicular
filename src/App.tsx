@@ -27,6 +27,7 @@ export default function App() {
     <Route path="vistorias" element={<Inspections/>}/>
     <Route path="vistorias/nova" element={<Inspector><NewInspection/></Inspector>}/>
     <Route path="vistorias/:id" element={<InspectionReport/>}/>
+    <Route path="vistorias/:id/editar" element={<Inspector><NewInspection/></Inspector>}/>
     <Route path="reprovacoes" element={<Inspections rejectedOnly/>}/>
     <Route path="veiculos" element={<EntityPage entity="vehicles"/>}/>
     <Route path="motoristas" element={<EntityPage entity="drivers"/>}/>

@@ -1,0 +1,117 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function activeUser() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userProfile().active == true
+        && userProfile().role in ['admin', 'inspector'];
+    }
+
+    function isAdmin() {
+      return activeUser() && userProfile().role == 'admin';
+    }
+
+    function isOperational() {
+      return activeUser() && userProfile().role in ['admin', 'inspector'];
+    }
+
+    function validDocumentPayload() {
+      return request.resource.data.entityType in ['company', 'driver', 'vehicle']
+        && request.resource.data.entityId is string
+        && request.resource.data.storagePath is string
+        && request.resource.data.fileName is string
+        && request.resource.data.mimeType in ['application/pdf', 'image/png', 'image/jpeg']
+        && request.resource.data.size is int
+        && request.resource.data.size > 0
+        && request.resource.data.size <= 10 * 1024 * 1024;
+    }
+
+    match /users/{userId} {
+      allow get: if activeUser() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /{collection}/{documentId} {
+      allow read: if isOperational() && collection in [
+        'clients',
+        'companies',
+        'projects',
+        'companyProjectAssignments',
+        'drivers',
+        'vehicles',
+        'vehicleDriverAssignments',
+        'vehicleProjectAssignments',
+        'accessProfiles',
+        'documentTypes',
+        'inspections',
+        'credentialApprovals',
+        'credentials'
+      ];
+      allow write: if false;
+    }
+
+    match /clients/{clientId} {
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['logoStoragePath', 'updatedAt', 'updatedBy']);
+    }
+
+    match /documents/{documentId} {
+      allow read: if isOperational();
+      allow create: if isOperational()
+        && validDocumentPayload()
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isOperational()
+        && validDocumentPayload()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'documentType', 'label', 'issueDate', 'expiryDate', 'observation',
+          'active', 'updatedAt', 'updatedBy'
+        ]);
+      allow delete: if false;
+    }
+
+    match /inspections/{inspectionId}/photos/{photoId} {
+      allow read: if isOperational();
+      allow create: if isOperational()
+        && request.resource.data.storagePath is string
+        && request.resource.data.mimeType in ['image/png', 'image/jpeg']
+        && request.resource.data.size is int
+        && request.resource.data.size > 0
+        && request.resource.data.size <= 10 * 1024 * 1024
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isOperational()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['label', 'description', 'active', 'updatedAt', 'updatedBy']);
+      allow delete: if false;
+    }
+
+    match /systemSettings/{settingId} {
+      allow read: if isOperational();
+      allow write: if false;
+    }
+
+    match /uniqueKeys/{keyId} {
+      allow read, write: if false;
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

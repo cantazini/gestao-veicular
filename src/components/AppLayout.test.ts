@@ -11,6 +11,10 @@ describe("navegação lateral", () => {
     expect(isMenuItemActive("/vistorias/29ABD04F-29A0-F111-9B33-002248377314", "/vistorias")).toBe(true);
     expect(isMenuItemActive("/vistorias/29ABD04F-29A0-F111-9B33-002248377314", "/vistorias/nova")).toBe(false);
   });
+  it("associa a edição de vistoria concluída ao Histórico", () => {
+    expect(isMenuItemActive("/vistorias/inspection-1/editar", "/vistorias")).toBe(true);
+    expect(isMenuItemActive("/vistorias/inspection-1/editar", "/vistorias/nova")).toBe(false);
+  });
 
   it("não ativa o Dashboard em outras rotas", () => {
     expect(isMenuItemActive("/veiculos", "/")).toBe(false);

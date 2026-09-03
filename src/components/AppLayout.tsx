@@ -45,7 +45,7 @@ const defaultGroups = Object.fromEntries(menuGroups.map((group) => [group.key, t
 
 export function isMenuItemActive(pathname: string, target: string) {
   if (target === "/") return pathname === "/";
-  if (target === "/vistorias") return pathname === target || (/^\/vistorias\/[^/]+$/.test(pathname) && pathname !== "/vistorias/nova");
+  if (target === "/vistorias") return pathname === target || (/^\/vistorias\/[^/]+(?:\/editar)?$/.test(pathname) && pathname !== "/vistorias/nova");
   return pathname === target;
 }
 

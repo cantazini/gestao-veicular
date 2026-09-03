@@ -1,4 +1,4 @@
-import { api, mockMode } from "./api";
+import { api, firebaseMode, mockMode } from "./api";
 import { normalizeDocumentDates, validateDocumentDates } from "./documents";
 
 export type ManagedFileKind = "company-document" | "driver-document" | "vehicle-document" | "inspection-photo" | "client-branding";
@@ -29,6 +29,40 @@ export async function uploadManagedFile(input: ManagedFileInput, file: File | Bl
     const blobPath = `mock/${input.entityId}/${crypto.randomUUID()}-${name}`;
     const completed = await api<{ id: string }>("/files/complete", { method: "POST", body: JSON.stringify({ ...common, blobPath }) });
     return { id: completed.id, blobPath: input.kind === "client-branding" ? "/assets/logo-klabin.png" : blobPath };
+  }
+  if (firebaseMode) {
+    const [{ doc, getDoc, serverTimestamp, setDoc, updateDoc }, { deleteObject, ref, uploadBytes }, { firebaseAuth, firebaseDb, firebaseStorage }] = await Promise.all([
+      import("firebase/firestore"), import("firebase/storage"), import("../firebase/config")
+    ]);
+    const user = firebaseAuth().currentUser;
+    if (!user) throw new Error("Sua sessão expirou. Entre novamente.");
+    const id = crypto.randomUUID();
+    const safeName = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]/g, "-").slice(-120);
+    const entityType = input.kind.replace("-document", "");
+    const storagePath = input.kind === "client-branding"
+      ? `clients/${input.entityId}/branding/${id}-${safeName}`
+      : input.kind === "inspection-photo"
+        ? `inspections/${input.entityId}/photos/${id}/${safeName}`
+        : `documents/${entityType}/${input.entityId}/${id}/${safeName}`;
+    const storageReference = ref(firebaseStorage(), storagePath);
+    await uploadBytes(storageReference, file, { contentType: mimeType, customMetadata: { uploadedBy: user.uid } });
+    try {
+      const stamp = serverTimestamp();
+      if (input.kind === "client-branding") {
+        const current = await getDoc(doc(firebaseDb(), "clients", input.entityId));
+        const oldPath = current.data()?.logoStoragePath;
+        await updateDoc(doc(firebaseDb(), "clients", input.entityId), { logoStoragePath: storagePath, updatedAt: stamp, updatedBy: user.uid });
+        if (oldPath && oldPath !== storagePath) await deleteObject(ref(firebaseStorage(), String(oldPath))).catch(() => undefined);
+      } else if (input.kind === "inspection-photo") {
+        await setDoc(doc(firebaseDb(), "inspections", input.entityId, "photos", id), { ...common, storagePath, active: true, createdAt: stamp, createdBy: user.uid, updatedAt: stamp, updatedBy: user.uid });
+      } else {
+        await setDoc(doc(firebaseDb(), "documents", id), { ...common, entityType, entityId: input.entityId, storagePath, active: true, createdAt: stamp, createdBy: user.uid, updatedAt: stamp, updatedBy: user.uid });
+      }
+      return { id, blobPath: storagePath };
+    } catch (reason) {
+      await deleteObject(storageReference).catch(() => undefined);
+      throw reason;
+    }
   }
   const ticket = await api<{ blobPath: string; uploadUrl: string }>("/files/upload-url", { method: "POST", body: JSON.stringify(common) });
   const upload = await fetch(ticket.uploadUrl, { method: "PUT", headers: { "x-ms-blob-type": "BlockBlob", "Content-Type": mimeType }, body: file });

@@ -1,4 +1,5 @@
 node_modules/
+.pnpm-store/
 dist/
 api/dist/
 .env
@@ -15,3 +16,13 @@ coverage/
 .tmp/
 migration/firebase-export.json
 migration/*.backup.json
+firebase-debug.log
+firebase-debug.*.log
+.firebase/
+functions/lib/
+functions/.env
+functions/.env.*
+**/*service-account*.json
+**/*serviceAccount*.json
+**/*firebase-adminsdk*.json
+application_default_credentials.json

@@ -20,7 +20,7 @@ export function ClientLogoPanel({ clientId, logoBlobPath, file, removed, onFileC
     setPreview(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
-  const persisted = !removed && logoBlobPath ? (logoBlobPath.startsWith("/") ? logoBlobPath : clientId ? `/api/clients/${clientId}/logo` : "") : "";
+  const persisted = !removed && logoBlobPath ? (/^(https?:|\/)/.test(logoBlobPath) ? logoBlobPath : clientId ? `/api/clients/${clientId}/logo` : "") : "";
   const source = preview || persisted;
 
   return <section className="form-attachment-section field-full">

@@ -1,4 +1,4 @@
-export type Role = "admin" | "inspector" | "supplier";
+export type Role = "admin" | "inspector";
 export interface User { id: string; name: string; email: string; role: Role; companyId?: string | null }
 export interface PageResult<T> { items: T[]; page: number; pageSize: number; total: number }
 export type EntityValue = string | number | boolean | null | undefined | string[];
@@ -7,6 +7,7 @@ export type ChecklistStatus = "conforme" | "nao_conforme" | "nao_se_aplica";
 export interface ChecklistItem { key: string; label: string; categoryKey: string; categoryLabel: string; status: ChecklistStatus; observation: string }
 export interface Inspection {
   id: string; code: string; inspectionDate: string; inspectionTime: string; mileage: number; result: "APROVADO" | "REPROVADO";
+  companyId?: string; projectId?: string; vehicleId?: string; driverId?: string;
   compliancePercentage: number; companyName?: string; clientName?: string; projectName?: string; driverName?: string;
   inspectorName?: string; plate?: string; clientLogoUrl?: string | null; generalObservations?: string; snapshot?: Record<string, Record<string, unknown>>;
   items?: ChecklistItem[]; photos?: Photo[];

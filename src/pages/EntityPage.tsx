@@ -124,14 +124,13 @@ const meta: Record<EntityName, PageMeta> = {
     ]
   },
   users: {
-    title: "Usuários", description: "Perfis internos associados às identidades corporativas do Microsoft Entra ID.", singular: "usuário",
+    title: "Usuários", description: "Perfis internos associados às contas do Firebase Authentication.", singular: "usuário",
     columns: [["name", "Nome"], ["email", "E-mail"], ["role", "Perfil"], ["active", "Status"]],
     fields: [
-      { key: "identityProviderId", label: "ID da identidade Microsoft", required: true, group: "Identidade", help: "Identificador fornecido pelo Microsoft Entra ID; não é uma senha." },
       { key: "name", label: "Nome", required: true, group: "Identidade" },
       { key: "email", label: "E-mail corporativo", type: "email", required: true, group: "Identidade" },
-      { key: "role", label: "Papel de acesso", type: "select", options: [["admin", "Administrador"], ["inspector", "Fiscalizador"], ["supplier", "Fornecedor"]], required: true, group: "Permissões" },
-      { key: "companyId", label: "Empresa", type: "select", source: "companies", group: "Permissões", help: "Obrigatória para usuários com papel Fornecedor." },
+      { key: "role", label: "Papel de acesso", type: "select", options: [["admin", "Administrador"], ["inspector", "Fiscalizador"]], required: true, group: "Permissões" },
+      { key: "companyId", label: "Empresa", type: "select", source: "companies", group: "Permissões", help: "Opcional; reservado para escopos organizacionais futuros." },
       { key: "active", label: "Usuário ativo", type: "checkbox", group: "Disponibilidade" }
     ]
   }
@@ -239,7 +238,7 @@ export function EntityPage({ entity }: { entity: EntityName }) {
   const accessProfilesQuery = sourceQueries.find((query) => query.source === "accessProfiles")?.result;
   const missingAccessProfiles = entity === "vehicles" && !accessProfilesQuery?.isLoading && !accessProfilesQuery?.data?.items.length;
   const items = useMemo(() => (data?.items || []).filter((item) => Object.values(item).join(" ").toLowerCase().includes(search.toLowerCase())), [data, search]);
-  const canWrite = user?.role === "admin" || (["drivers", "vehicles"].includes(entity) && user?.role === "supplier");
+  const canWrite = user?.role === "admin" || (user?.role === "inspector" && ["companies", "drivers", "vehicles"].includes(entity));
 
   const open = (item?: Entity) => {
     setEditing(item || ({ id: "" } as Entity));

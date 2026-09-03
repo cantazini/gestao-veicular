@@ -1,5 +1,11 @@
 packages:
   - api
+  - functions
+
+allowBuilds:
+  '@firebase/util': true
+  protobufjs: true
+  re2: true
 
 minimumReleaseAgeExclude:
   - '@tanstack/query-core@5.102.2'
@@ -7,3 +13,6 @@ minimumReleaseAgeExclude:
 
 onlyBuiltDependencies:
   - esbuild
+  - '@firebase/util'
+  - protobufjs
+  - re2

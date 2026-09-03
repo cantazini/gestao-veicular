@@ -254,3 +254,6 @@ td { padding-block: 14px; }
 @media (prefers-reduced-motion: reduce) {
   .skeleton-value, .table-skeleton i, .button-spinner { animation: none; }
 }
+/* Autenticação Firebase: mantém a identidade visual existente com controles acessíveis. */
+.login-form{display:grid;gap:14px}.login-form>label{display:grid;gap:7px;color:var(--ink-700,#334155);font-size:.86rem;font-weight:700}.login-input{display:flex;align-items:center;gap:10px;border:1px solid var(--line,#dbe3eb);border-radius:12px;background:#fff;padding:0 12px;transition:border-color .15s,box-shadow .15s}.login-input:focus-within{border-color:#0b64a4;box-shadow:0 0 0 3px rgba(11,100,164,.12)}.login-input>svg{width:18px;color:#64748b;flex:none}.login-input input{width:100%;min-height:46px;border:0!important;box-shadow:none!important;padding:0!important;background:transparent}.login-input button{display:grid;place-items:center;border:0;background:transparent;color:#64748b;cursor:pointer;padding:6px}.login-input button svg{width:18px}.login-reset{justify-self:end;border:0;background:transparent;color:#075a9c;font-size:.84rem;font-weight:700;cursor:pointer;padding:0}.login-reset:hover{text-decoration:underline}
+.report-toolbar>span{display:flex;gap:10px;flex-wrap:wrap}.section-heading-row>div:last-child:has(.photo-counter){display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}

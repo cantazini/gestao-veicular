@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Camera, Car, Check, ChevronLeft, ChevronRight, FolderKanban, ImagePlus, Save, Trash2, UserRound } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { CHECKLIST_GROUPS, newChecklist } from "../data/checklist";
 import { api, mockMode } from "../lib/api";
 import { currentTime, today } from "../lib/format";
 import { prepareImage, type PreparedImage } from "../lib/images";
+import { uploadManagedFile } from "../lib/files";
 import type { ChecklistStatus, Entity, Inspection, PageResult } from "../types";
 
 const photoSlots = [["front", "Frontal"], ["rear", "Traseira"], ["left", "Lateral esquerda"], ["right", "Lateral direita"], ["cabin", "Cabine / interior"], ["dashboard", "Painel"], ["additional-1", "Adicional 1"], ["additional-2", "Adicional 2"]] as const;
@@ -16,20 +17,34 @@ const label = (item?: Entity) => String(item?.name || item?.legalName || item?.p
 
 export function NewInspection() {
   const navigate = useNavigate();
+  const { id: inspectionId } = useParams();
+  const editing = Boolean(inspectionId);
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ companyId: "", projectId: "", vehicleId: "", driverId: "", inspectionDate: today(), inspectionTime: currentTime(), mileage: 0, generalObservations: "" });
   const [items, setItems] = useState(newChecklist());
   const [photos, setPhotos] = useState<Record<string, PreparedImage>>({});
+  const [extraPhotoSlots, setExtraPhotoSlots] = useState<Array<[string, string]>>([]);
   const [error, setError] = useState("");
+  const [hydrated, setHydrated] = useState(false);
   const photosRef = useRef(photos);
   photosRef.current = photos;
+  const allPhotoSlots: readonly (readonly [string, string])[] = [...photoSlots, ...extraPhotoSlots];
 
   useEffect(() => () => Object.values(photosRef.current).forEach((photo) => URL.revokeObjectURL(photo.preview)), []);
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
   }, [step]);
+
+  const existingInspection = useQuery({ queryKey: ["inspection", inspectionId], queryFn: () => api<Inspection>(`/inspections/${inspectionId}`), enabled: editing });
+  useEffect(() => {
+    const current = existingInspection.data;
+    if (!current || hydrated) return;
+    setForm({ companyId: current.companyId || "", projectId: current.projectId || "", vehicleId: current.vehicleId || "", driverId: current.driverId || "", inspectionDate: current.inspectionDate, inspectionTime: current.inspectionTime, mileage: current.mileage, generalObservations: current.generalObservations || "" });
+    if (current.items?.length) setItems(current.items);
+    setHydrated(true);
+  }, [existingInspection.data, hydrated]);
 
   const optionNames = ["companies", "projects", "vehicles", "drivers"] as const;
   const optionQueries = useQueries({ queries: optionNames.map((name) => ({ queryKey: [name, "inspection-options"], queryFn: () => api<PageResult<Entity>>(`/${name}?pageSize=100&active=true`) })) });
@@ -58,15 +73,16 @@ export function NewInspection() {
     mutationFn: async () => {
       const missingObservation = items.find((item) => item.status === "nao_conforme" && !item.observation.trim());
       if (missingObservation) throw new Error(`Descreva a não conformidade em “${missingObservation.label}”.`);
-      const localPhotos = mockMode ? Object.entries(photos).map(([type, photo]) => ({ id: crypto.randomUUID(), photoType: type, label: photoSlots.find((slot) => slot[0] === type)?.[1] || "Fotografia", url: photo.preview })) : undefined;
-      const inspection = await api<Inspection>("/inspections", { method: "POST", body: JSON.stringify({ ...form, mileage: Number(form.mileage), items, ...(localPhotos ? { photos: localPhotos } : {}) }) });
+      const localPhotos = mockMode ? Object.entries(photos).map(([type, photo]) => ({ id: crypto.randomUUID(), photoType: type, label: allPhotoSlots.find((slot) => slot[0] === type)?.[1] || "Fotografia", url: photo.preview })) : undefined;
+      const inspection = await api<Inspection>(editing ? `/inspections/${inspectionId}` : "/inspections", { method: editing ? "PUT" : "POST", body: JSON.stringify({ ...form, mileage: Number(form.mileage), items, ...(localPhotos ? { photos: localPhotos } : {}) }) });
       if (!mockMode) {
         for (const [type, image] of Object.entries(photos)) {
-          const photoLabel = photoSlots.find((slot) => slot[0] === type)?.[1] || "Fotografia";
-          const ticket = await api<{ blobPath: string; uploadUrl: string }>("/files/upload-url", { method: "POST", body: JSON.stringify({ kind: "inspection-photo", entityId: inspection.id, fileName: image.fileName, mimeType: image.mimeType, size: image.blob.size }) });
-          const upload = await fetch(ticket.uploadUrl, { method: "PUT", headers: { "x-ms-blob-type": "BlockBlob", "Content-Type": image.mimeType }, body: image.blob });
-          if (!upload.ok) throw new Error(`A vistoria foi salva, mas a foto “${photoLabel}” não pôde ser enviada.`);
-          await api("/files/complete", { method: "POST", body: JSON.stringify({ kind: "inspection-photo", entityId: inspection.id, blobPath: ticket.blobPath, fileName: image.fileName, mimeType: image.mimeType, size: image.blob.size, originalSize: image.originalSize, width: image.width, height: image.height, photoType: type, label: photoLabel }) });
+          const photoLabel = allPhotoSlots.find((slot) => slot[0] === type)?.[1] || "Fotografia";
+          try {
+            await uploadManagedFile({ kind: "inspection-photo", entityId: inspection.id, photoType: type, label: photoLabel, originalSize: image.originalSize, width: image.width, height: image.height }, image.blob, image.fileName);
+          } catch {
+            throw new Error(`A vistoria foi salva, mas a foto “${photoLabel}” não pôde ser enviada.`);
+          }
         }
       }
       return inspection;
@@ -93,12 +109,12 @@ export function NewInspection() {
     } catch (reason) { setError((reason as Error).message); }
   };
 
-  const mileageIsValid = Number(form.mileage) >= Number(selectedVehicle?.mileage || 0);
+  const mileageIsValid = editing || Number(form.mileage) >= Number(selectedVehicle?.mileage || 0);
   const canNext = step !== 1 || Boolean(form.companyId && form.projectId && form.vehicleId && form.driverId && form.inspectionDate && form.inspectionTime && mileageIsValid);
   const nextHint = step === 1 && !canNext ? !form.companyId ? "Comece selecionando a empresa." : !form.projectId ? "Selecione um projeto autorizado." : !form.vehicleId ? "Selecione um veículo do projeto." : !form.driverId ? "Selecione um motorista vinculado ao veículo." : !mileageIsValid ? "A quilometragem não pode ser menor que o último registro." : "Preencha data e hora." : "";
 
   return <>
-    <PageHeader eyebrow="Vistorias" title="Nova vistoria" description="Registre a identificação, execute o checklist e anexe evidências em um fluxo guiado."/>
+    <PageHeader eyebrow="Vistorias" title={editing ? "Editar vistoria" : "Nova vistoria"} description={editing ? "Revise os dados concluídos. O resultado será recalculado e aprovações de credencial serão invalidadas." : "Registre a identificação, execute o checklist e anexe evidências em um fluxo guiado."}/>
     <section className="wizard-progress" aria-label="Progresso da vistoria">
       <div className="wizard-progress-copy"><span>Etapa {step} de {steps.length}</span><strong>{steps[step - 1]}</strong></div>
       <div className="stepper">{steps.map((name, index) => {
@@ -108,7 +124,7 @@ export function NewInspection() {
     </section>
 
     <section className="card inspection-card">
-      {step === 1 && (optionsLoading ? <div className="loading">Carregando cadastros…</div> : optionsError ? <EmptyState title="Não foi possível carregar os cadastros" text={optionsError instanceof Error ? optionsError.message : "Tente novamente em alguns instantes."} action={<button className="button secondary" onClick={() => optionQueries.forEach((query) => void query.refetch())}>Tentar novamente</button>}/> : !companies.length ? <EmptyState title="Cadastre uma empresa antes da vistoria" text="A vistoria depende de uma empresa ativa e de seus vínculos operacionais." action={<Link className="button primary" to="/empresas">Ir para Empresas</Link>}/> : <div>
+      {step === 1 && (optionsLoading || (editing && existingInspection.isLoading) ? <div className="loading">Carregando cadastros…</div> : existingInspection.isError ? <EmptyState title="Não foi possível carregar a vistoria" text="Volte ao histórico e tente novamente."/> : optionsError ? <EmptyState title="Não foi possível carregar os cadastros" text={optionsError instanceof Error ? optionsError.message : "Tente novamente em alguns instantes."} action={<button className="button secondary" onClick={() => optionQueries.forEach((query) => void query.refetch())}>Tentar novamente</button>}/> : !companies.length ? <EmptyState title="Cadastre uma empresa antes da vistoria" text="A vistoria depende de uma empresa ativa e de seus vínculos operacionais." action={<Link className="button primary" to="/empresas">Ir para Empresas</Link>}/> : <div>
         <div className="section-heading"><span className="section-kicker">Dados operacionais</span><h2>Identificação da vistoria</h2><p>Os campos são liberados conforme os vínculos cadastrados.</p></div>
         <div className="dependency-flow" aria-label="Sequência de seleção">
           <Dependency icon={<Building2/>} label="Empresa" value={label(selectedCompany)} ready={Boolean(selectedCompany)}/>
@@ -134,8 +150,9 @@ export function NewInspection() {
       </div>}
 
       {step === 3 && <div>
-        <div className="section-heading section-heading-row"><div><span className="section-kicker">Evidências</span><h2>Registro fotográfico</h2><p>Opcional. As imagens são otimizadas antes do envio, sem perder legibilidade.</p></div><span className="photo-counter">{Object.keys(photos).length} de {photoSlots.length} fotos</span></div>
-        <div className="photo-uploader-grid">{photoSlots.map(([type, photoLabel]) => <article className={`photo-upload ${photos[type] ? "has-photo" : ""}`} key={type}>{photos[type] ? <><img src={photos[type].preview} alt={photoLabel}/><div className="photo-overlay"><strong>{photoLabel}</strong><div><label className="icon-button" title="Substituir foto"><Camera/><span className="sr-only">Substituir foto {photoLabel}</span><input type="file" accept="image/jpeg,image/png" capture="environment" onChange={(event) => void selectPhoto(type, event.target.files?.[0])}/></label><button type="button" className="icon-button danger" title="Remover foto" onClick={() => { URL.revokeObjectURL(photos[type].preview); setPhotos((current) => { const next = { ...current }; delete next[type]; return next; }); }}><Trash2/><span className="sr-only">Remover foto {photoLabel}</span></button></div></div></> : <label><ImagePlus/><strong>{photoLabel}</strong><span>Fotografar ou escolher imagem</span><input type="file" accept="image/jpeg,image/png" capture="environment" onChange={(event) => void selectPhoto(type, event.target.files?.[0])}/></label>}</article>)}</div>
+        <div className="section-heading section-heading-row"><div><span className="section-kicker">Evidências</span><h2>Registro fotográfico</h2><p>Opcional. As imagens são otimizadas antes do envio, sem perder legibilidade.</p></div><div><span className="photo-counter">{Object.keys(photos).length} foto(s)</span><button type="button" className="button ghost" onClick={() => setExtraPhotoSlots((current) => [...current, [`additional-${crypto.randomUUID()}`, `Adicional ${current.length + 3}`]])}><ImagePlus size={17}/> Adicionar foto extra</button></div></div>
+        {editing && existingInspection.data?.photos?.length ? <div className="alert info">As {existingInspection.data.photos.length} foto(s) já registradas serão preservadas. Novas imagens serão adicionadas ao registro.</div> : null}
+        <div className="photo-uploader-grid">{allPhotoSlots.map(([type, photoLabel]) => <article className={`photo-upload ${photos[type] ? "has-photo" : ""}`} key={type}>{photos[type] ? <><img src={photos[type].preview} alt={photoLabel}/><div className="photo-overlay"><strong>{photoLabel}</strong><div><label className="icon-button" title="Substituir foto"><Camera/><span className="sr-only">Substituir foto {photoLabel}</span><input type="file" accept="image/jpeg,image/png" capture="environment" onChange={(event) => void selectPhoto(type, event.target.files?.[0])}/></label><button type="button" className="icon-button danger" title="Remover foto" onClick={() => { URL.revokeObjectURL(photos[type].preview); setPhotos((current) => { const next = { ...current }; delete next[type]; return next; }); }}><Trash2/><span className="sr-only">Remover foto {photoLabel}</span></button></div></div></> : <label><ImagePlus/><strong>{photoLabel}</strong><span>Fotografar ou escolher imagem</span><input type="file" accept="image/jpeg,image/png" capture="environment" onChange={(event) => void selectPhoto(type, event.target.files?.[0])}/></label>}</article>)}</div>
       </div>}
 
       {step === 4 && <div>
@@ -149,7 +166,7 @@ export function NewInspection() {
     {error && <div className="alert error floating-alert" role="alert">{error}</div>}
     <div className="wizard-actions">
       {step > 1 ? <button type="button" className="button ghost" onClick={() => { setError(""); setStep(step - 1); }}><ChevronLeft/> Voltar</button> : <span/>}
-      <div className="wizard-next">{nextHint && <small>{nextHint}</small>}{step < 4 ? <button type="button" className="button primary" disabled={!canNext} onClick={() => { setError(""); setStep(step + 1); }}>Continuar <ChevronRight/></button> : <button type="button" className="button primary" disabled={mutation.isPending} onClick={() => mutation.mutate()}><Save/>{mutation.isPending ? "Salvando…" : "Concluir vistoria"}</button>}</div>
+      <div className="wizard-next">{nextHint && <small>{nextHint}</small>}{step < 4 ? <button type="button" className="button primary" disabled={!canNext} onClick={() => { setError(""); setStep(step + 1); }}>Continuar <ChevronRight/></button> : <button type="button" className="button primary" disabled={mutation.isPending} onClick={() => mutation.mutate()}><Save/>{mutation.isPending ? "Salvando…" : editing ? "Salvar revisão" : "Concluir vistoria"}</button>}</div>
     </div>
   </>;
 }
