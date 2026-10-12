@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, FileCheck2, Pencil, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
@@ -13,11 +14,22 @@ import { useAuth } from "../auth/AuthContext";
 
 interface Filters { entityType: "" | DocumentEntityType; clientId: string; companyId: string; documentType: string; status: "" | DocumentStatus; search: string }
 const initialFilters: Filters = { entityType: "", clientId: "", companyId: "", documentType: "", status: "", search: "" };
+const documentStatuses: DocumentStatus[] = ["VALID", "EXPIRING", "EXPIRED"];
+const statusFromUrl = (value: string | null): "" | DocumentStatus => documentStatuses.includes(value as DocumentStatus) ? value as DocumentStatus : "";
 
 export function Documents() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [filters, setFilters] = useState<Filters>(initialFilters);
+  // O filtro de status pode chegar pela URL (cards do Dashboard: /documentos?status=EXPIRING).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlStatus = statusFromUrl(searchParams.get("status"));
+  const [filters, setFilters] = useState<Filters>(() => ({ ...initialFilters, status: urlStatus }));
+  useEffect(() => { setFilters((current) => current.status === urlStatus ? current : { ...current, status: urlStatus }); }, [urlStatus]);
+  const syncStatusParam = (status: string) => setSearchParams((current) => {
+    const next = new URLSearchParams(current);
+    if (status) next.set("status", status); else next.delete("status");
+    return next;
+  }, { replace: true });
   const [editing, setEditing] = useState<DocumentRecord | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,7 +46,10 @@ export function Documents() {
   const types = filters.entityType
     ? documentTypeOptions[filters.entityType]
     : [...new Map(Object.values(documentTypeOptions).flat().map(([value, label]) => [value, label])).entries()];
-  const update = (key: keyof Filters, value: string) => setFilters((current) => ({ ...current, [key]: value, ...(key === "clientId" ? { companyId: "" } : {}) } as Filters));
+  const update = (key: keyof Filters, value: string) => {
+    setFilters((current) => ({ ...current, [key]: value, ...(key === "clientId" ? { companyId: "" } : {}) } as Filters));
+    if (key === "status") syncStatusParam(value);
+  };
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["documents"] });
 
   const remove = async (document: DocumentRecord) => {
@@ -77,7 +92,7 @@ export function Documents() {
         <label className="field"><span>Tipo</span><select value={filters.documentType} onChange={(event) => update("documentType", event.target.value)}><option value="">Todos</option>{types.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
         <label className="field"><span>Status</span><select value={filters.status} onChange={(event) => update("status", event.target.value)}><option value="">Todos</option><option value="VALID">Válidos</option><option value="EXPIRING">Próximos do vencimento</option><option value="EXPIRED">Vencidos</option></select></label>
       </div>
-      <div className="toolbar"><label className="search"><Search size={18}/><input placeholder="Buscar documento, entidade ou identificação" value={filters.search} onChange={(event) => update("search", event.target.value)}/></label><button className="button ghost" type="button" disabled={!Object.values(filters).some(Boolean)} onClick={() => setFilters(initialFilters)}>Limpar filtros</button></div>
+      <div className="toolbar"><label className="search"><Search size={18}/><input placeholder="Buscar documento, entidade ou identificação" value={filters.search} onChange={(event) => update("search", event.target.value)}/></label><button className="button ghost" type="button" disabled={!Object.values(filters).some(Boolean)} onClick={() => { setFilters(initialFilters); syncStatusParam(""); }}>Limpar filtros</button></div>
       {message && <div className="alert info" role="status">{message}</div>}
       {documents.isLoading ? <div className="loading">Consultando documentos…</div> : documents.isError ? <EmptyState title="Não foi possível carregar os documentos" text={documents.error instanceof Error ? documents.error.message : "Tente novamente."}/> : documents.data?.length ? <div className="table-scroll"><table><thead><tr><th>Documento</th><th>Entidade</th><th>Categoria</th><th>Cliente / empresa</th><th>Identificação</th><th>Emissão</th><th>Validade</th><th>Status</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{documents.data.map((document) => <tr key={document.id}><td><strong>{document.label}</strong><small>{documentTypeLabel(document.entityType, document.documentType)}</small></td><td>{document.entityName}</td><td>{documentCategoryLabel[document.entityType]}</td><td>{document.clientName}<small>{document.companyName}</small></td><td>{document.entityIdentifier}</td><td>{formatDate(document.issueDate)}</td><td>{formatDate(document.expiryDate)}</td><td><span className={`document-status ${document.documentStatus.toLowerCase()}`}>{documentStatusLabel[document.documentStatus]}</span></td><td><div className="table-actions"><a className="table-action" href={document.url} target="_blank" rel="noreferrer"><ExternalLink size={16}/> Abrir</a>{canWrite && <><button className="table-action" onClick={() => setEditing(document)}><Pencil size={16}/> Editar</button><label className="table-action"><RefreshCw size={16}/> Substituir<input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={(event) => void replace(document, event.target.files?.[0])}/></label><button className="table-action danger-text" disabled={busy} onClick={() => void remove(document)}><Trash2 size={16}/> Excluir</button></>}</div></td></tr>)}</tbody></table></div> : <EmptyState title="Nenhum documento encontrado" text="Adicione documentos durante o cadastro ou ajuste os filtros desta central."/>}
     </section>

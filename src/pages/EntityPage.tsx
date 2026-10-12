@@ -3,16 +3,28 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { Edit3, Plus, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { DriverCompanyGroups } from "../components/DriverCompanyGroups";
+import { DriverFiltersPanel } from "../components/DriverFiltersPanel";
 import { EmptyState } from "../components/EmptyState";
-import { ClientLogoPanel } from "../components/ClientLogoPanel";
+import { EntityLogoPanel } from "../components/EntityLogoPanel";
 import { EntityDocumentsPanel, type PendingDocument } from "../components/EntityDocumentsPanel";
 import { FormModal } from "../components/FormModal";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import { VehicleCoverPanel } from "../components/VehicleCoverPanel";
+import { VehicleDirectory } from "../components/VehicleDirectory";
+import { VehicleFiltersPanel } from "../components/VehicleFiltersPanel";
+import { OrganizationDirectory } from "../components/OrganizationDirectory";
+import { CompanyParentSelect } from "../components/CompanyParentSelect";
+import { createsCompanyCycle, type OrganizationKind } from "../lib/organizationDirectory";
+import { loadOrganizationRecords } from "../lib/loadOrganizationRecords";
 import { api } from "../lib/api";
+import { entityCompanyIds, primaryCompanyId, sharesCompany } from "../lib/companyLinks";
 import { formatCnpj, formatDate, onlyDigits, text } from "../lib/format";
 import { uploadManagedFile } from "../lib/files";
+import { EMPTY_DRIVER_FILTERS, type DriverFilters } from "../lib/driverGroups";
 import { refreshEntityQueries } from "../lib/queryCache";
+import { EMPTY_VEHICLE_FILTERS, normalizeVehicleType, VEHICLE_TYPES, type VehicleFilters } from "../lib/vehicleGroups";
 import type { Entity, PageResult } from "../types";
 
 type EntityName = "clients" | "projects" | "companies" | "drivers" | "vehicles" | "accessProfiles" | "users";
@@ -67,7 +79,7 @@ const meta: Record<EntityName, PageMeta> = {
       { key: "email", label: "E-mail", type: "email", group: "Contato e operação", placeholder: "responsavel@empresa.com.br" },
       { key: "contractNumber", label: "Número do contrato", group: "Contrato" },
       { key: "contractType", label: "Tipo de contrato", type: "select", options: [["direct", "Direto"], ["subcontractor", "Subcontratado"]], required: true, group: "Contrato" },
-      { key: "parentCompanyId", label: "Empresa contratante", type: "select", source: "companies", required: true, group: "Contrato", help: "Obrigatório quando a empresa é subcontratada.", showWhen: (form) => form.contractType === "subcontractor" },
+      { key: "parentCompanyId", label: "Empresa contratante", type: "select", source: "companies", group: "Contrato", help: "Opcional. Selecione uma contratante ativa do mesmo cliente para informar a hierarquia.", showWhen: (form) => form.contractType === "subcontractor" },
       { key: "contractStart", label: "Início do contrato", type: "date", group: "Contrato" },
       { key: "contractEnd", label: "Fim do contrato", type: "date", group: "Contrato" },
       { key: "projectIds", label: "Projetos autorizados", type: "multiselect", source: "projects", group: "Vínculos operacionais", full: true, help: "Selecione todos os projetos em que esta empresa pode atuar." },
@@ -78,7 +90,7 @@ const meta: Record<EntityName, PageMeta> = {
     title: "Motoristas", description: "Condutores habilitados e vinculados às empresas.", singular: "motorista",
     columns: [["name", "Nome"], ["registration", "Matrícula"], ["licenseCategory", "CNH"], ["licenseExpiry", "Validade"], ["active", "Status"]],
     fields: [
-      { key: "companyId", label: "Empresa", type: "select", source: "companies", required: true, group: "Vínculo" },
+      { key: "companyIds", label: "Empresas vinculadas", type: "multiselect", source: "companies", required: true, group: "Vínculo", full: true, help: "Selecione todas as empresas que este motorista atende. O cadastro do motorista continua único." },
       { key: "name", label: "Nome", required: true, group: "Identificação" },
       { key: "registration", label: "Matrícula", required: true, group: "Identificação" },
       { key: "jobTitle", label: "Função", group: "Identificação" },
@@ -106,20 +118,20 @@ const meta: Record<EntityName, PageMeta> = {
     title: "Veículos", description: "Frota, vínculos operacionais e quilometragem atual.", singular: "veículo",
     columns: [["plate", "Placa"], ["brand", "Marca"], ["model", "Modelo"], ["year", "Ano"], ["mileage", "Quilometragem"], ["active", "Status"]],
     fields: [
-      { key: "companyId", label: "Empresa responsável", type: "select", source: "companies", required: true, group: "Vínculos operacionais", help: "A empresa define os projetos, motoristas e perfis compatíveis." },
+      { key: "companyIds", label: "Empresas atendidas", type: "multiselect", source: "companies", required: true, group: "Vínculos operacionais", full: true, help: "Selecione todas as empresas que este veículo atende. As empresas definem os projetos, motoristas e perfis compatíveis." },
       { key: "projectId", label: "Projeto", type: "select", source: "projects", required: true, group: "Vínculos operacionais" },
       { key: "accessProfileId", label: "Perfil de circulação e acesso", type: "select", source: "accessProfiles", required: true, group: "Vínculos operacionais", help: "Define as portarias e áreas em que o veículo está autorizado a circular.", full: true },
       { key: "plate", label: "Placa", required: true, group: "Identificação do veículo", placeholder: "ABC1D23" },
       { key: "brand", label: "Marca", required: true, group: "Identificação do veículo" },
       { key: "model", label: "Modelo", required: true, group: "Identificação do veículo" },
       { key: "year", label: "Ano", type: "number", required: true, group: "Identificação do veículo" },
-      { key: "type", label: "Tipo", type: "select", options: [["Carro", "Carro"], ["Van", "Van"], ["Caminhão", "Caminhão"], ["Utilitário", "Utilitário"], ["Moto", "Moto"], ["Outro", "Outro"]], required: true, group: "Características" },
+      { key: "type", label: "Tipo", type: "select", options: VEHICLE_TYPES.map(({ storedValue, label }) => [storedValue, label]), required: true, group: "Características" },
       { key: "color", label: "Cor", group: "Características" },
       { key: "fuel", label: "Combustível", group: "Características" },
       { key: "mileage", label: "Quilometragem", type: "number", required: true, group: "Características" },
       { key: "ownership", label: "Propriedade", type: "select", options: [["owned", "Próprio"], ["rented", "Locado"]], required: true, group: "Propriedade" },
       { key: "rentalCompany", label: "Locadora", group: "Propriedade", showWhen: (form) => form.ownership === "rented" },
-      { key: "driverIds", label: "Motoristas autorizados", type: "multiselect", source: "drivers", group: "Motoristas", full: true, help: "Somente motoristas ativos da empresa selecionada aparecem aqui." },
+      { key: "driverIds", label: "Motoristas autorizados", type: "multiselect", source: "drivers", group: "Motoristas", full: true, help: "Somente motoristas ativos que atendem ao menos uma das empresas selecionadas aparecem aqui." },
       { key: "active", label: "Veículo ativo", type: "checkbox", group: "Disponibilidade" }
     ]
   },
@@ -155,32 +167,63 @@ export function EntityPage({ entity }: { entity: EntityName }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [driverFilters, setDriverFilters] = useState<DriverFilters>({ ...EMPTY_DRIVER_FILTERS });
+  const [vehicleFilters, setVehicleFilters] = useState<VehicleFilters>({ ...EMPTY_VEHICLE_FILTERS });
   const [editing, setEditing] = useState<Entity | null>(null);
   const [form, setForm] = useState<Record<string, unknown>>(defaults(config.fields));
   const [message, setMessage] = useState("");
   const [pendingDocuments, setPendingDocuments] = useState<PendingDocument[]>([]);
-  const [clientLogoFile, setClientLogoFile] = useState<File | null>(null);
-  const [clientLogoRemoved, setClientLogoRemoved] = useState(false);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoRemoved, setLogoRemoved] = useState(false);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverRemoved, setCoverRemoved] = useState(false);
+  const [multiSelectFilters, setMultiSelectFilters] = useState<Record<string, string>>({});
 
-  const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: [entity], queryFn: () => api<PageResult<Entity>>(`/${entity}?pageSize=100`) });
+  const organizationDirectory = ["clients", "projects", "companies"].includes(entity);
+  const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: organizationDirectory ? [entity, "directory"] : [entity], queryFn: () => organizationDirectory ? loadOrganizationRecords(entity) : api<PageResult<Entity>>(`/${entity}?pageSize=100`) });
   const sources = [...new Set(config.fields.map((field) => field.source).filter(Boolean))] as EntityName[];
-  const sourceResults = useQueries({ queries: sources.map((source) => ({ queryKey: [source, "options"], queryFn: () => api<PageResult<Entity>>(`/${source}?pageSize=100&active=true`) })) });
+  const sourceResults = useQueries({ queries: sources.map((source) => {
+    if (organizationDirectory && ["clients", "companies"].includes(source)) return { queryKey: [source, "directory"], queryFn: () => loadOrganizationRecords(source) };
+    const includeInactiveCompanies = ["drivers", "vehicles"].includes(entity) && source === "companies";
+    return { queryKey: [source, "options", includeInactiveCompanies ? "all" : "active"], queryFn: () => api<PageResult<Entity>>(`/${source}?pageSize=100${includeInactiveCompanies ? "" : "&active=true"}`) };
+  }) });
   const sourceQueries = sources.map((source, index) => ({ source, result: sourceResults[index] }));
 
   const mutation = useMutation({
     mutationFn: async () => {
       const isUpdate = Boolean(editing?.id);
-      const saved = await api<Entity>(isUpdate ? `/${entity}/${editing!.id}` : `/${entity}`, { method: isUpdate ? "PUT" : "POST", body: JSON.stringify(normalize(form, config.fields)) });
+      const payload = normalize(form, config.fields);
+      if (entity === "drivers" || entity === "vehicles") {
+        // Empresa principal (retrocompatibilidade): mantém a atual enquanto continuar selecionada.
+        const selectedCompanies = (form.companyIds as string[] || []).filter(Boolean);
+        const primary = primaryCompanyId(editing?.companyId, selectedCompanies);
+        payload.companyId = primary;
+        payload.companyIds = [primary, ...selectedCompanies.filter((id) => id !== primary)];
+      }
+      if (entity === "companies") payload.parentCompanyId = form.contractType === "subcontractor" ? form.parentCompanyId || null : null;
+      const saved = await api<Entity>(isUpdate ? `/${entity}/${editing!.id}` : `/${entity}`, { method: isUpdate ? "PUT" : "POST", body: JSON.stringify(payload) });
       const warnings: string[] = [];
-      if (entity === "clients") {
-        if (clientLogoFile) {
+      if (entity === "clients" || entity === "companies") {
+        const brandingKind = entity === "clients" ? "client-branding" : "company-branding";
+        if (logoFile) {
           try {
-            const uploaded = await uploadManagedFile({ kind: "client-branding", entityId: saved.id }, clientLogoFile);
+            const uploaded = await uploadManagedFile({ kind: brandingKind, entityId: saved.id }, logoFile);
             saved.logoBlobPath = uploaded.blobPath;
           } catch (reason) { warnings.push(`A logo não foi enviada: ${(reason as Error).message}`); }
-        } else if (clientLogoRemoved && editing?.id && editing.logoBlobPath) {
-          try { await api(`/clients/${saved.id}/logo`, { method: "DELETE" }); saved.logoBlobPath = null; }
+        } else if (logoRemoved && editing?.id && editing.logoBlobPath) {
+          try { await api(`/${entity}/${saved.id}/logo`, { method: "DELETE" }); saved.logoBlobPath = null; }
           catch (reason) { warnings.push(`A logo não foi removida: ${(reason as Error).message}`); }
+        }
+      }
+      if (entity === "vehicles") {
+        if (coverFile) {
+          try {
+            const uploaded = await uploadManagedFile({ kind: "vehicle-cover", entityId: saved.id }, coverFile);
+            saved.coverBlobPath = uploaded.blobPath;
+          } catch (reason) { warnings.push(`A foto do veículo não foi enviada: ${(reason as Error).message}`); }
+        } else if (coverRemoved && editing?.id && editing.coverBlobPath) {
+          try { await api(`/vehicles/${saved.id}/cover`, { method: "DELETE" }); saved.coverBlobPath = null; }
+          catch (reason) { warnings.push(`A foto do veículo não foi removida: ${(reason as Error).message}`); }
         }
       }
       const documentEntity = entity === "companies" ? "company" : entity === "drivers" ? "driver" : entity === "vehicles" ? "vehicle" : null;
@@ -202,7 +245,7 @@ export function EntityPage({ entity }: { entity: EntityName }) {
       void queryClient.invalidateQueries({ queryKey: ["documents"] });
       setEditing(null);
       setForm(defaults(config.fields));
-      setPendingDocuments([]); setClientLogoFile(null); setClientLogoRemoved(false);
+      setPendingDocuments([]); setLogoFile(null); setLogoRemoved(false); setCoverFile(null); setCoverRemoved(false);
       setMessage(warnings.length ? `Registro salvo. ${warnings.join(" ")}` : "Registro salvo com sucesso.");
     },
     onError: (reason: Error) => setMessage(reason.message)
@@ -211,21 +254,41 @@ export function EntityPage({ entity }: { entity: EntityName }) {
   const sourceItems = (source?: EntityName) => sourceQueries.find((query) => query.source === source)?.result.data?.items || [];
   const options = (source?: EntityName) => {
     const candidates = sourceItems(source);
+    if (organizationDirectory && source === "clients") return candidates.filter((item) => item.active === true || item.id === form.clientId);
+    if (["drivers", "vehicles"].includes(entity) && source === "companies") return candidates.filter((item) => item.active === true || (form.companyIds as string[] || []).includes(item.id));
     if (entity === "companies" && source === "projects") return candidates.filter((item) => item.clientId === form.clientId);
-    if (entity === "companies" && source === "companies") return candidates.filter((item) => item.clientId === form.clientId && item.id !== editing?.id);
+    if (entity === "companies" && source === "companies") {
+      const byId = new Map(candidates.map((item) => [item.id, item]));
+      return candidates.filter((item) => item.clientId === form.clientId && (item.active === true || item.id === form.parentCompanyId) && !createsCompanyCycle(editing?.id || "", item.id, byId));
+    }
     if (entity === "vehicles") {
-      const company = sourceItems("companies").find((item) => item.id === form.companyId);
-      if (source === "projects") return candidates.filter((item) => Array.isArray(company?.projectIds) && company.projectIds.includes(item.id));
-      if (source === "drivers") return candidates.filter((item) => item.companyId === form.companyId);
-      if (source === "accessProfiles") return candidates.filter((item) => !item.clientId || item.clientId === company?.clientId);
+      const constraints = vehicleCompanyConstraints(form.companyIds);
+      if (source === "projects") return candidates.filter((item) => constraints.projectIds.has(item.id));
+      if (source === "drivers") return candidates.filter((item) => sharesCompany(item, { companyIds: form.companyIds }));
+      if (source === "accessProfiles") return candidates.filter((item) => profileMatchesCompanies(item, constraints.companies));
     }
     return candidates;
   };
+  // Veículo em várias empresas: projeto autorizado em ao menos uma; perfil compatível com o cliente de todas.
+  const vehicleCompanyConstraints = (companyIds: unknown) => {
+    const selectedIds = Array.isArray(companyIds) ? companyIds as string[] : [];
+    const companies = sourceItems("companies").filter((item) => selectedIds.includes(item.id));
+    return { companies, projectIds: new Set(companies.flatMap((company) => Array.isArray(company.projectIds) ? company.projectIds : [])) };
+  };
+  const profileMatchesCompanies = (profile: Entity, companies: Entity[]) => !profile.clientId || (companies.length > 0 && companies.every((company) => company.clientId === profile.clientId));
 
   const updateField = (key: string, value: unknown) => {
     const next = { ...form, [key]: value };
     if (key === "clientId" && entity === "companies") { next.parentCompanyId = ""; next.projectIds = []; }
-    if (key === "companyId" && entity === "vehicles") { next.projectId = ""; next.accessProfileId = ""; next.driverIds = []; }
+    if (key === "companyIds" && entity === "vehicles") {
+      // Remove somente as seleções que ficaram incompatíveis com as empresas escolhidas.
+      const constraints = vehicleCompanyConstraints(value);
+      if (next.projectId && !constraints.projectIds.has(String(next.projectId))) next.projectId = "";
+      const profile = sourceItems("accessProfiles").find((item) => item.id === next.accessProfileId);
+      if (next.accessProfileId && (!profile || !profileMatchesCompanies(profile, constraints.companies))) next.accessProfileId = "";
+      const drivers = sourceItems("drivers");
+      next.driverIds = (next.driverIds as string[] || []).filter((id) => sharesCompany(drivers.find((driver) => driver.id === id), { companyIds: value }));
+    }
     if (key === "contractType" && value !== "subcontractor") next.parentCompanyId = "";
     if (key === "ownership" && value !== "rented") next.rentalCompany = "";
     setForm(next);
@@ -234,40 +297,56 @@ export function EntityPage({ entity }: { entity: EntityName }) {
 
   const prerequisite = prerequisites[entity];
   const prerequisiteQuery = sourceQueries.find((query) => query.source === prerequisite?.source)?.result;
-  const missingPrerequisite = Boolean(prerequisite && !prerequisiteQuery?.isLoading && !prerequisiteQuery?.data?.items.length);
+  const prerequisiteItems = prerequisiteQuery?.data?.items || [];
+  const hasPrerequisite = prerequisiteItems.some((item) => item.active === true);
+  const missingPrerequisite = Boolean(prerequisite && !prerequisiteQuery?.isLoading && !hasPrerequisite);
   const accessProfilesQuery = sourceQueries.find((query) => query.source === "accessProfiles")?.result;
   const missingAccessProfiles = entity === "vehicles" && !accessProfilesQuery?.isLoading && !accessProfilesQuery?.data?.items.length;
-  const items = useMemo(() => (data?.items || []).filter((item) => Object.values(item).join(" ").toLowerCase().includes(search.toLowerCase())), [data, search]);
+  const items = useMemo(() => ["drivers", "vehicles"].includes(entity) ? (data?.items || []) : (data?.items || []).filter((item) => Object.values(item).join(" ").toLowerCase().includes(search.toLowerCase())), [data, entity, search]);
   const canWrite = user?.role === "admin" || (user?.role === "inspector" && ["companies", "drivers", "vehicles"].includes(entity));
+  const companySource = sourceQueries.find((query) => query.source === "companies")?.result;
+  const groupedDirectory = ["drivers", "vehicles"].includes(entity);
+  const clientSource = sourceQueries.find((query) => query.source === "clients")?.result;
+  const relatedDirectorySource = organizationDirectory ? clientSource : groupedDirectory ? companySource : undefined;
+  const directoryLoading = isLoading || relatedDirectorySource?.isLoading;
+  const directoryError = isError || relatedDirectorySource?.isError;
+  const directoryErrorReason = error || relatedDirectorySource?.error;
 
   const open = (item?: Entity) => {
     setEditing(item || ({ id: "" } as Entity));
     const next = { ...defaults(config.fields), ...(item || {}) };
+    // Registros legados possuem somente companyId: a edição passa a listar as empresas vinculadas.
+    if (entity === "drivers" || entity === "vehicles") next.companyIds = entityCompanyIds(item);
     for (const field of config.fields.filter((field) => ["gates", "areas"].includes(field.key))) {
       if (Array.isArray(next[field.key])) next[field.key] = (next[field.key] as string[]).join(", ");
     }
     setForm(next);
-    setPendingDocuments([]); setClientLogoFile(null); setClientLogoRemoved(false);
+    setPendingDocuments([]); setLogoFile(null); setLogoRemoved(false); setCoverFile(null); setCoverRemoved(false);
     setMessage("");
   };
 
   const isFieldDisabled = (field: Field) => Boolean(
-    (entity === "vehicles" && ["projectId", "accessProfileId"].includes(field.key) && !form.companyId) ||
-    (entity === "vehicles" && field.key === "driverIds" && !form.companyId) ||
+    (entity === "vehicles" && ["projectId", "accessProfileId", "driverIds"].includes(field.key) && !(form.companyIds as string[] || []).length) ||
     (entity === "companies" && ["parentCompanyId", "projectIds"].includes(field.key) && !form.clientId)
   );
 
   const fieldHelp = (field: Field) => {
     const fieldOptions = options(field.source);
     if (entity === "vehicles" && field.key === "projectId") {
-      if (!form.companyId) return "Selecione a empresa para liberar os projetos autorizados.";
-      if (!fieldOptions.length) return "A empresa selecionada não possui projeto ativo vinculado.";
+      if (!(form.companyIds as string[] || []).length) return "Selecione ao menos uma empresa para liberar os projetos autorizados.";
+      if (!fieldOptions.length) return "As empresas selecionadas não possuem projeto ativo vinculado.";
+      return "Projetos autorizados em ao menos uma das empresas selecionadas.";
     }
     if (entity === "vehicles" && field.key === "accessProfileId") {
-      if (!form.companyId) return "Selecione a empresa para buscar perfis globais ou do mesmo cliente.";
+      if (!(form.companyIds as string[] || []).length) return "Selecione ao menos uma empresa para buscar perfis globais ou do mesmo cliente.";
       if (!fieldOptions.length) return user?.role === "admin" ? <>Nenhum perfil compatível foi encontrado. <Link to="/administracao?tab=accessProfiles">Configurar perfis de acesso</Link>.</> : "Nenhum perfil compatível foi encontrado. Solicite a configuração a um administrador.";
     }
-    if (entity === "vehicles" && field.key === "driverIds" && form.companyId && !fieldOptions.length) return "Nenhum motorista ativo está vinculado a esta empresa.";
+    if (entity === "vehicles" && field.key === "driverIds" && (form.companyIds as string[] || []).length && !fieldOptions.length) return "Nenhum motorista ativo atende as empresas selecionadas.";
+    if ((entity === "drivers" || entity === "vehicles") && field.key === "companyIds") {
+      const selectedCompanies = (form.companyIds as string[] || []);
+      const primary = sourceItems("companies").find((item) => item.id === primaryCompanyId(editing?.companyId, selectedCompanies));
+      return selectedCompanies.length > 1 && primary ? `${field.help} Empresa principal: ${labelFor(primary)}.` : field.help;
+    }
     return field.help;
   };
 
@@ -275,6 +354,9 @@ export function EntityPage({ entity }: { entity: EntityName }) {
     event.preventDefault();
     const missing = config.fields.find((field) => field.required && field.showWhen?.(form) !== false && (form[field.key] === "" || form[field.key] === undefined || (Array.isArray(form[field.key]) && !(form[field.key] as unknown[]).length)));
     if (missing) { setMessage(`Preencha o campo obrigatório “${missing.label}”.`); return; }
+    if (entity === "companies" && form.parentCompanyId && createsCompanyCycle(editing?.id || "", String(form.parentCompanyId), new Map(sourceItems("companies").map((item) => [item.id, item])))) {
+      setMessage("A empresa contratante criaria um ciclo na hierarquia."); return;
+    }
     mutation.mutate();
   };
 
@@ -283,9 +365,12 @@ export function EntityPage({ entity }: { entity: EntityName }) {
     {missingPrerequisite && prerequisite && <div className="alert info" role="status">Cadastre ao menos um {prerequisite.label} ativo antes de criar este registro. <Link to={prerequisite.path}>Ir para o cadastro</Link>.</div>}
     {missingAccessProfiles && <div className="alert info" role="status">Veículos precisam de um perfil de circulação ativo. {user?.role === "admin" ? <Link to="/administracao?tab=accessProfiles">Configurar perfis agora</Link> : "Solicite a configuração a um administrador."}</div>}
     {message && !editing && <div className="alert success" role="status">{message}</div>}
-    <section className="card">
-      <div className="toolbar"><label className="search"><Search size={18}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Buscar em ${config.title.toLowerCase()}`} aria-label={`Buscar em ${config.title}`}/></label></div>
-      {isLoading ? <div className="loading">Carregando…</div> : isError ? <EmptyState title="Não foi possível carregar os registros" text={error instanceof Error ? error.message : "Tente novamente em alguns instantes."} action={<button className="button secondary" onClick={() => void refetch()}>Tentar novamente</button>}/> : items.length ? <div className="table-scroll"><table><thead><tr>{config.columns.map(([, columnLabel]) => <th key={columnLabel}>{columnLabel}</th>)}{canWrite && <th><span className="sr-only">Ações</span></th>}</tr></thead><tbody>{items.map((item) => <tr key={item.id}>{config.columns.map(([key]) => <td key={key}>{key === "active" ? <StatusBadge value={Boolean(item[key])}/> : key.toLowerCase().includes("expiry") ? formatDate(item[key]) : key === "document" ? formatCnpj(item[key]) : key === "plate" ? <span className="plate">{text(item[key])}</span> : key === "contractType" ? (item[key] === "direct" ? "Direto" : "Subcontratado") : text(item[key])}</td>)}{canWrite && <td><button className="table-action" onClick={() => open(item)}><Edit3 size={16}/> Editar</button></td>}</tr>)}</tbody></table></div> : <EmptyState title={missingPrerequisite ? `Cadastre primeiro um ${prerequisite?.label}` : "Nenhum registro encontrado"} text={missingPrerequisite ? "Esta etapa depende de um cadastro ativo anterior." : "Os registros cadastrados aparecerão aqui."} action={missingPrerequisite && prerequisite ? <Link className="button secondary" to={prerequisite.path}>Ir para o cadastro</Link> : undefined}/>}</section>
+    <section className={`card${entity === "drivers" ? " driver-directory-card" : entity === "vehicles" ? " vehicle-directory-card" : ""}`}>
+      {entity === "drivers" ? <DriverFiltersPanel value={driverFilters} onChange={setDriverFilters}/> : entity === "vehicles" ? <VehicleFiltersPanel value={vehicleFilters} onChange={setVehicleFilters}/> : organizationDirectory ? null : <div className="toolbar"><label className="search"><Search size={18}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Buscar em ${config.title.toLowerCase()}`} aria-label={`Buscar em ${config.title}`}/></label></div>}
+      {directoryLoading ? <div className="loading">Carregando…</div> : directoryError ? <EmptyState title="Não foi possível carregar os registros" text={directoryErrorReason instanceof Error ? directoryErrorReason.message : "Tente novamente em alguns instantes."} action={<button className="button secondary" onClick={() => {
+        void refetch();
+        void relatedDirectorySource?.refetch();
+      }}>Tentar novamente</button>}/> : organizationDirectory ? <OrganizationDirectory key={entity} kind={entity as OrganizationKind} items={data?.items || []} clients={sourceItems("clients")} canWrite={Boolean(canWrite)} onEdit={open}/> : entity === "vehicles" ? <VehicleDirectory vehicles={items} companies={sourceItems("companies")} filters={vehicleFilters} canWrite={Boolean(canWrite)} onEdit={open}/> : items.length ? entity === "drivers" ? <DriverCompanyGroups drivers={items} companies={sourceItems("companies")} filters={driverFilters} canWrite={Boolean(canWrite)} onEdit={open}/> : <div className="table-scroll"><table><thead><tr>{config.columns.map(([, columnLabel]) => <th key={columnLabel}>{columnLabel}</th>)}{canWrite && <th><span className="sr-only">Ações</span></th>}</tr></thead><tbody>{items.map((item) => <tr key={item.id}>{config.columns.map(([key]) => <td key={key}>{key === "active" ? <StatusBadge value={Boolean(item[key])}/> : key.toLowerCase().includes("expiry") ? formatDate(item[key]) : key === "document" ? formatCnpj(item[key]) : key === "plate" ? <span className="plate">{text(item[key])}</span> : key === "contractType" ? (item[key] === "direct" ? "Direto" : "Subcontratado") : text(item[key])}</td>)}{canWrite && <td><button className="table-action" onClick={() => open(item)}><Edit3 size={16}/> Editar</button></td>}</tr>)}</tbody></table></div> : <EmptyState title={missingPrerequisite ? `Cadastre primeiro um ${prerequisite?.label}` : "Nenhum registro encontrado"} text={missingPrerequisite ? "Esta etapa depende de um cadastro ativo anterior." : "Os registros cadastrados aparecerão aqui."} action={missingPrerequisite && prerequisite ? <Link className="button secondary" to={prerequisite.path}>Ir para o cadastro</Link> : undefined}/>}</section>
 
     {editing && <FormModal
       title={editing.id ? `Editar ${config.singular}` : `Novo ${config.singular}`}
@@ -309,22 +394,35 @@ export function EntityPage({ entity }: { entity: EntityName }) {
               <input id={fieldId} type="checkbox" checked={Boolean(form[field.key])} onChange={(event) => updateField(field.key, event.target.checked)}/><span>{field.label}</span>
             </label> : <div className={`field ${field.full ? "field-full" : ""}`}>
               <label htmlFor={fieldId}>{field.label}{field.required && <span className="required-mark" aria-label="obrigatório"> *</span>}</label>
-              {field.type === "select" ? <select id={fieldId} required={field.required} value={String(form[field.key] || "")} onChange={(event) => updateField(field.key, event.target.value)} disabled={isFieldDisabled(field)}>
+              {entity === "companies" && field.key === "parentCompanyId" ? <CompanyParentSelect id={fieldId} value={String(form.parentCompanyId || "")} options={fieldOptions} disabled={isFieldDisabled(field)} onChange={(value) => updateField(field.key, value)}/> : field.type === "select" ? <select id={fieldId} required={field.required} value={String(form[field.key] || "")} onChange={(event) => updateField(field.key, event.target.value)} disabled={isFieldDisabled(field)}>
                 <option value="">Selecione uma opção</option>
+                {entity === "vehicles" && field.key === "type" && Boolean(form.type) && !normalizeVehicleType(form.type) && <option value={String(form.type)}>Tipo legado: {String(form.type)}</option>}
                 {field.options?.map(([value, optionLabel]) => <option key={value} value={value}>{optionLabel}</option>)}
                 {fieldOptions.map((option) => <option key={option.id} value={option.id}>{labelFor(option)}</option>)}
-              </select> : field.type === "multiselect" ? <div id={fieldId} className={`multi-select-list ${isFieldDisabled(field) ? "disabled" : ""}`} role="group" aria-label={field.label}>
-                {fieldOptions.length ? fieldOptions.map((option) => <label key={option.id}><input type="checkbox" checked={selected.includes(option.id)} disabled={isFieldDisabled(field)} onChange={(event) => updateField(field.key, event.target.checked ? [...selected, option.id] : selected.filter((id) => id !== option.id))}/><span>{labelFor(option)}</span></label>) : <span className="multi-select-empty">Nenhuma opção disponível</span>}
-              </div> : field.type === "cnpj" ? <input id={fieldId} required={field.required} inputMode="numeric" autoComplete="off" maxLength={18} value={formatCnpj(form[field.key])} onChange={(event) => updateField(field.key, formatCnpj(event.target.value))} placeholder="00.000.000/0000-00"/> : field.type === "phone" ? <input id={fieldId} type="tel" inputMode="tel" autoComplete="tel" maxLength={15} value={formatPhone(form[field.key])} onChange={(event) => updateField(field.key, formatPhone(event.target.value))} placeholder={field.placeholder}/> : field.type === "color" ? <div className="color-field"><input id={fieldId} type="color" value={String(form[field.key] || "#0056A4")} onChange={(event) => updateField(field.key, event.target.value)}/><span>{String(form[field.key] || "#0056A4").toUpperCase()}</span></div> : <input id={fieldId} required={field.required} type={field.type || "text"} min={field.type === "number" ? 0 : undefined} autoComplete={field.type === "email" ? "email" : "off"} value={String(form[field.key] ?? "")} onChange={(event) => updateField(field.key, field.key === "plate" ? event.target.value.toUpperCase() : event.target.value)} placeholder={field.placeholder}/>} 
+              </select> : field.type === "multiselect" ? <>
+                {fieldOptions.length > 8 && <input className="multi-select-filter" type="search" aria-label={`Filtrar ${field.label.toLowerCase()}`} placeholder={`Filtrar ${field.label.toLowerCase()} por nome`} value={multiSelectFilters[field.key] || ""} onChange={(event) => setMultiSelectFilters((current) => ({ ...current, [field.key]: event.target.value }))}/>}
+                <div id={fieldId} className={`multi-select-list ${isFieldDisabled(field) ? "disabled" : ""}`} role="group" aria-label={field.label}>
+                  {fieldOptions.length ? filterMultiSelectOptions(fieldOptions, selected, multiSelectFilters[field.key]).map((option) => <label key={option.id}><input type="checkbox" checked={selected.includes(option.id)} disabled={isFieldDisabled(field)} onChange={(event) => updateField(field.key, event.target.checked ? [...selected, option.id] : selected.filter((id) => id !== option.id))}/><span>{labelFor(option)}{option.active === false && " (inativa)"}</span></label>) : <span className="multi-select-empty">Nenhuma opção disponível</span>}
+                </div>
+                {fieldOptions.length > 8 && <small className="multi-select-count">{selected.length} selecionada(s) de {fieldOptions.length}.</small>}
+              </> : field.type === "cnpj" ? <input id={fieldId} required={field.required} inputMode="numeric" autoComplete="off" maxLength={18} value={formatCnpj(form[field.key])} onChange={(event) => updateField(field.key, formatCnpj(event.target.value))} placeholder="00.000.000/0000-00"/> : field.type === "phone" ? <input id={fieldId} type="tel" inputMode="tel" autoComplete="tel" maxLength={15} value={formatPhone(form[field.key])} onChange={(event) => updateField(field.key, formatPhone(event.target.value))} placeholder={field.placeholder}/> : field.type === "color" ? <div className="color-field"><input id={fieldId} type="color" value={String(form[field.key] || "#0056A4")} onChange={(event) => updateField(field.key, event.target.value)}/><span>{String(form[field.key] || "#0056A4").toUpperCase()}</span></div> : <input id={fieldId} required={field.required} type={field.type || "text"} min={field.type === "number" ? 0 : undefined} autoComplete={field.type === "email" ? "email" : "off"} value={String(form[field.key] ?? "")} onChange={(event) => updateField(field.key, field.key === "plate" ? event.target.value.toUpperCase() : event.target.value)} placeholder={field.placeholder}/>}
               {help && <small className="field-help">{help}</small>}
             </div>}
           </Fragment>;
         })}
-        {entity === "clients" && <ClientLogoPanel clientId={editing.id || undefined} logoBlobPath={String(editing.logoBlobPath || "")} file={clientLogoFile} removed={clientLogoRemoved} onFileChange={setClientLogoFile} onRemovedChange={setClientLogoRemoved}/>} 
+        {(entity === "clients" || entity === "companies") && <EntityLogoPanel entityId={editing.id || undefined} entityKind={entity === "clients" ? "client" : "company"} logoBlobPath={String(editing.logoBlobPath || "")} file={logoFile} removed={logoRemoved} onFileChange={setLogoFile} onRemovedChange={setLogoRemoved}/>}
+        {entity === "vehicles" && <VehicleCoverPanel entityId={editing.id || undefined} coverBlobPath={String(editing.coverBlobPath || "")} file={coverFile} removed={coverRemoved} onFileChange={setCoverFile} onRemovedChange={setCoverRemoved}/>}
         {(["companies", "drivers", "vehicles"] as EntityName[]).includes(entity) && <EntityDocumentsPanel entityType={entity === "companies" ? "company" : entity === "drivers" ? "driver" : "vehicle"} entityId={editing.id || undefined} pending={pendingDocuments} onPendingChange={setPendingDocuments} canWrite={Boolean(canWrite)}/>} 
       </div>
     </FormModal>}
   </>;
+}
+
+/** Filtro por nome da multisseleção; as opções já marcadas continuam visíveis. */
+function filterMultiSelectOptions(options: Entity[], selected: string[], term = "") {
+  const normalized = term.trim().toLowerCase();
+  if (!normalized) return options;
+  return options.filter((option) => selected.includes(option.id) || labelFor(option).toLowerCase().includes(normalized));
 }
 
 function normalize(form: Record<string, unknown>, fields: Field[]) {

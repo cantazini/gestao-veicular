@@ -1,4 +1,5 @@
 import type { Entity } from "../types";
+import { entityCompanyIds } from "./companyLinks";
 import { onlyDigits } from "./format";
 
 export type ImportEntity = "clients" | "projects" | "companies" | "accessProfiles" | "drivers" | "vehicles";
@@ -51,6 +52,19 @@ const validCnpj = (input: unknown) => {
 };
 const validDate = (input: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(input ?? ""));
 const uniqueError = (errors: string[], found: boolean, message: string) => { if (found) errors.push(message); };
+const documentList = (input: unknown) => [...new Set(list(input).map(onlyDigits).filter(Boolean))];
+const candidateDocuments = (data: Record<string, unknown>) => Array.isArray(data.companyDocuments) && data.companyDocuments.length ? data.companyDocuments.map(String) : [String(data.companyDocument || "")];
+// Matrícula é única por empresa: um motorista com várias empresas ocupa a chave em cada uma delas.
+function driverRegistrationKeys(drivers: Entity[], companyIds: Map<string, string>) {
+  const keys = new Map<string, string>();
+  for (const driver of drivers.filter((item) => item.active)) {
+    for (const companyId of entityCompanyIds(driver)) {
+      const document = [...companyIds].find(([, id]) => id === companyId)?.[0];
+      if (document) keys.set(`${document}|${normalized(driver.registration)}`, String(driver.id));
+    }
+  }
+  return keys;
+}
 
 export async function readWorkbook(file: File): Promise<ImportWorkbookRows> {
   if (!/\.xlsx?$/i.test(file.name)) throw new Error("Selecione uma planilha Excel no formato XLSX.");
@@ -80,10 +94,7 @@ export function analyzeImportRows(workbook: ImportWorkbookRows, existing: Existi
     const codes = existing.projects.filter((project) => (company.projectIds as string[] || []).includes(project.id)).map((project) => normalized(project.code));
     companyProjects.set(onlyDigits(company.document), new Set(codes.map((code) => `${clientDocument}|${code}`)));
   });
-  const driverIds = new Map(existing.drivers.filter((item) => item.active).map((item) => {
-    const companyDocument = [...companyIds].find(([, id]) => id === item.companyId)?.[0] || "";
-    return [`${companyDocument}|${normalized(item.registration)}`, String(item.id)];
-  }));
+  const driverIds = driverRegistrationKeys(existing.drivers, companyIds);
   const profileIds = new Map(existing.accessProfiles.filter((item) => item.active).map((item) => {
     const clientDocument = [...clientIds].find(([, id]) => id === item.clientId)?.[0] || "";
     return [`${clientDocument}|${normalized(item.name)}`, String(item.id)];
@@ -127,15 +138,16 @@ export function analyzeImportRows(workbook: ImportWorkbookRows, existing: Existi
         if (candidate.status === "valid") profileIds.set(key, "__file__");
       }
       if (entity === "drivers") {
-        const companyDocument = onlyDigits(value(row, "Empresa_CNPJ")); const registration = value(row, "Matricula"); const name = value(row, "Nome"); const licenseExpiry = value(row, "Validade_CNH"); const key = `${companyDocument}|${normalized(registration)}`;
-        if (!companyIds.has(companyDocument)) errors.push("Empresa não encontrada."); if (!name) errors.push("Nome obrigatório."); if (!registration) errors.push("Matrícula obrigatória."); if (!value(row, "Categoria_CNH")) errors.push("Categoria da CNH obrigatória."); if (!validDate(licenseExpiry)) errors.push("Validade da CNH deve usar AAAA-MM-DD."); uniqueError(errors, driverIds.has(key), "Matrícula já cadastrada ou repetida para esta empresa.");
-        const candidate = push(entity, sheet, index, `${registration} · ${name}`, errors, { companyDocument, name, registration, jobTitle: value(row, "Funcao"), licenseCategory: value(row, "Categoria_CNH"), licenseNumber: value(row, "Numero_CNH"), licenseExpiry, provisionalLicense: boolean(row.CNH_Provisoria, false), active: boolean(row.Ativo) });
-        if (candidate.status === "valid") driverIds.set(key, "__file__");
+        // Empresa_CNPJ aceita um ou mais CNPJs separados por ";": o motorista é único e atende todas as empresas informadas.
+        const companyDocuments = documentList(row.Empresa_CNPJ); const registration = value(row, "Matricula"); const name = value(row, "Nome"); const licenseExpiry = value(row, "Validade_CNH"); const keys = companyDocuments.map((document) => `${document}|${normalized(registration)}`);
+        if (!companyDocuments.length) errors.push("Empresa não encontrada."); else if (companyDocuments.some((document) => !companyIds.has(document))) errors.push(companyDocuments.length > 1 ? "Uma ou mais empresas não foram encontradas." : "Empresa não encontrada."); if (!name) errors.push("Nome obrigatório."); if (!registration) errors.push("Matrícula obrigatória."); if (!value(row, "Categoria_CNH")) errors.push("Categoria da CNH obrigatória."); if (!validDate(licenseExpiry)) errors.push("Validade da CNH deve usar AAAA-MM-DD."); uniqueError(errors, keys.some((key) => driverIds.has(key)), "Matrícula já cadastrada ou repetida para esta empresa.");
+        const candidate = push(entity, sheet, index, `${registration} · ${name}`, errors, { companyDocument: companyDocuments[0] || "", companyDocuments, name, registration, jobTitle: value(row, "Funcao"), licenseCategory: value(row, "Categoria_CNH"), licenseNumber: value(row, "Numero_CNH"), licenseExpiry, provisionalLicense: boolean(row.CNH_Provisoria, false), active: boolean(row.Ativo) });
+        if (candidate.status === "valid") keys.forEach((key) => driverIds.set(key, "__file__"));
       }
       if (entity === "vehicles") {
-        const companyDocument = onlyDigits(value(row, "Empresa_CNPJ")); const clientDocument = companyClients.get(companyDocument) || ""; const projectCode = value(row, "Projeto_Codigo"); const projectKey = `${clientDocument}|${normalized(projectCode)}`; const profileName = value(row, "Perfil_Acesso"); const profileKey = `${clientDocument}|${normalized(profileName)}`; const plate = normalized(row.Placa).replace(/[^A-Z0-9]/g, ""); const registrations = list(row.Motoristas_Matriculas); const year = Number(value(row, "Ano")); const mileage = Number(value(row, "Quilometragem"));
-        if (!companyIds.has(companyDocument)) errors.push("Empresa não encontrada."); if (!projectIds.has(projectKey) || !companyProjects.get(companyDocument)?.has(projectKey)) errors.push("Projeto não está vinculado à empresa."); if (!profileIds.has(profileKey)) errors.push("Perfil de acesso não encontrado para o cliente."); if (!/^[A-Z0-9]{7}$/.test(plate)) errors.push("Placa inválida."); if (!value(row, "Marca") || !value(row, "Modelo")) errors.push("Marca e modelo são obrigatórios."); if (!Number.isInteger(year) || year < 1950 || year > 2200) errors.push("Ano inválido."); if (!Number.isInteger(mileage) || mileage < 0) errors.push("Quilometragem inválida."); if (registrations.some((registration) => !driverIds.has(`${companyDocument}|${normalized(registration)}`))) errors.push("Um ou mais motoristas não pertencem à empresa."); uniqueError(errors, plates.has(plate), "Placa já cadastrada ou repetida na planilha.");
-        const candidate = push(entity, sheet, index, `${plate} · ${value(row, "Marca")} ${value(row, "Modelo")}`, errors, { companyDocument, clientDocument, projectCode, profileName, plate, brand: value(row, "Marca"), model: value(row, "Modelo"), year, type: value(row, "Tipo"), color: value(row, "Cor"), fuel: value(row, "Combustivel"), mileage, ownership: normalized(row.Propriedade) === "LOCADO" ? "rented" : "owned", rentalCompany: value(row, "Locadora"), registrations, active: boolean(row.Ativo) });
+        const companyDocuments = documentList(row.Empresa_CNPJ); const companyDocument = companyDocuments[0] || ""; const clientDocument = companyClients.get(companyDocument) || ""; const projectCode = value(row, "Projeto_Codigo"); const projectKey = `${clientDocument}|${normalized(projectCode)}`; const profileName = value(row, "Perfil_Acesso"); const profileKey = `${clientDocument}|${normalized(profileName)}`; const plate = normalized(row.Placa).replace(/[^A-Z0-9]/g, ""); const registrations = list(row.Motoristas_Matriculas); const year = Number(value(row, "Ano")); const mileage = Number(value(row, "Quilometragem"));
+        if (!companyDocuments.length || companyDocuments.some((document) => !companyIds.has(document))) errors.push(companyDocuments.length > 1 ? "Uma ou mais empresas não foram encontradas." : "Empresa não encontrada."); if (companyDocuments.some((document) => companyClients.get(document) !== clientDocument)) errors.push("As empresas informadas devem pertencer ao mesmo cliente."); if (!projectIds.has(projectKey) || !companyDocuments.some((document) => companyProjects.get(document)?.has(projectKey))) errors.push("Projeto não está vinculado a nenhuma das empresas."); if (!profileIds.has(profileKey)) errors.push("Perfil de acesso não encontrado para o cliente."); if (!/^[A-Z0-9]{7}$/.test(plate)) errors.push("Placa inválida."); if (!value(row, "Marca") || !value(row, "Modelo")) errors.push("Marca e modelo são obrigatórios."); if (!Number.isInteger(year) || year < 1950 || year > 2200) errors.push("Ano inválido."); if (!Number.isInteger(mileage) || mileage < 0) errors.push("Quilometragem inválida."); if (registrations.some((registration) => !companyDocuments.some((document) => driverIds.has(`${document}|${normalized(registration)}`)))) errors.push("Um ou mais motoristas não pertencem às empresas do veículo."); uniqueError(errors, plates.has(plate), "Placa já cadastrada ou repetida na planilha.");
+        const candidate = push(entity, sheet, index, `${plate} · ${value(row, "Marca")} ${value(row, "Modelo")}`, errors, { companyDocument, companyDocuments, clientDocument, projectCode, profileName, plate, brand: value(row, "Marca"), model: value(row, "Modelo"), year, type: value(row, "Tipo"), color: value(row, "Cor"), fuel: value(row, "Combustivel"), mileage, ownership: normalized(row.Propriedade) === "LOCADO" ? "rented" : "owned", rentalCompany: value(row, "Locadora"), registrations, active: boolean(row.Ativo) });
         if (candidate.status === "valid") plates.add(plate);
       }
     });
@@ -152,7 +164,7 @@ export async function executeImport(
   const projectIds = new Map<string, string>();
   existing.projects.filter((item) => item.active).forEach((item) => { const document = [...clientIds].find(([, id]) => id === item.clientId)?.[0]; if (document) projectIds.set(`${document}|${normalized(item.code)}`, String(item.id)); });
   const companyIds = new Map(existing.companies.filter((item) => item.active).map((item) => [onlyDigits(item.document), String(item.id)]));
-  const driverIds = new Map(existing.drivers.filter((item) => item.active).map((item) => { const document = [...companyIds].find(([, id]) => id === item.companyId)?.[0] || ""; return [`${document}|${normalized(item.registration)}`, String(item.id)]; }));
+  const driverIds = driverRegistrationKeys(existing.drivers, companyIds);
   const profileIds = new Map(existing.accessProfiles.filter((item) => item.active).map((item) => { const document = [...clientIds].find(([, id]) => id === item.clientId)?.[0] || ""; return [`${document}|${normalized(item.name)}`, String(item.id)]; }));
 
   for (const candidate of candidates.filter((item) => item.status === "valid")) {
@@ -162,14 +174,14 @@ export async function executeImport(
       if (candidate.entity === "projects") { payload = { name: data.name, code: data.code, active: data.active, clientId: clientIds.get(String(data.clientDocument)) }; }
       if (candidate.entity === "companies") { const clientDocument = String(data.clientDocument); payload = { ...data, clientId: clientIds.get(clientDocument), projectIds: (data.projectCodes as string[]).map((code) => projectIds.get(`${clientDocument}|${normalized(code)}`)), parentCompanyId: data.parentDocument ? companyIds.get(String(data.parentDocument)) : "" }; delete payload.clientDocument; delete payload.parentDocument; delete payload.projectCodes; }
       if (candidate.entity === "accessProfiles") { const clientDocument = String(data.clientDocument); payload = { ...data, clientId: clientIds.get(clientDocument) }; delete payload.clientDocument; }
-      if (candidate.entity === "drivers") { payload = { ...data, companyId: companyIds.get(String(data.companyDocument)) }; delete payload.companyDocument; }
-      if (candidate.entity === "vehicles") { const companyDocument = String(data.companyDocument); const clientDocument = String(data.clientDocument); payload = { ...data, companyId: companyIds.get(companyDocument), projectId: projectIds.get(`${clientDocument}|${normalized(data.projectCode)}`), accessProfileId: profileIds.get(`${clientDocument}|${normalized(data.profileName)}`), driverIds: (data.registrations as string[]).map((registration) => driverIds.get(`${companyDocument}|${normalized(registration)}`)) }; ["companyDocument", "clientDocument", "projectCode", "profileName", "registrations"].forEach((key) => delete payload[key]); }
+      if (candidate.entity === "drivers") { const documents = candidateDocuments(data); const linked = documents.map((document) => companyIds.get(document)); payload = { ...data, companyId: linked[0], companyIds: linked }; delete payload.companyDocument; delete payload.companyDocuments; }
+      if (candidate.entity === "vehicles") { const documents = candidateDocuments(data); const clientDocument = String(data.clientDocument); const linked = documents.map((document) => companyIds.get(document)); payload = { ...data, companyId: linked[0], companyIds: linked, projectId: projectIds.get(`${clientDocument}|${normalized(data.projectCode)}`), accessProfileId: profileIds.get(`${clientDocument}|${normalized(data.profileName)}`), driverIds: (data.registrations as string[]).map((registration) => documents.map((document) => driverIds.get(`${document}|${normalized(registration)}`)).find(Boolean)) }; ["companyDocument", "companyDocuments", "clientDocument", "projectCode", "profileName", "registrations"].forEach((key) => delete payload[key]); }
       const saved = await create(candidate.entity, payload);
       if (candidate.entity === "clients") clientIds.set(String(data.document), saved.id);
       if (candidate.entity === "projects") projectIds.set(`${data.clientDocument}|${normalized(data.code)}`, saved.id);
       if (candidate.entity === "companies") companyIds.set(String(data.document), saved.id);
       if (candidate.entity === "accessProfiles") profileIds.set(`${data.clientDocument}|${normalized(data.name)}`, saved.id);
-      if (candidate.entity === "drivers") driverIds.set(`${data.companyDocument}|${normalized(data.registration)}`, saved.id);
+      if (candidate.entity === "drivers") candidateDocuments(data).forEach((document) => driverIds.set(`${document}|${normalized(data.registration)}`, saved.id));
       onResult(candidate.id, "imported");
     } catch (reason) { onResult(candidate.id, "failed", reason instanceof Error ? reason.message : "Falha ao importar a linha."); }
   }

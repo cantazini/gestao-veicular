@@ -6,9 +6,13 @@ import { auditEntry } from "./audit.js";
 import { firestore, serverTimestamp } from "./firebase.js";
 import { active, cnpj, dateOnly, optionalDateOnly, optionalFirestoreId, firestoreId, normalizeCode, normalizePlate } from "./validation.js";
 import { logOperation } from "./observability.js";
+import { validateCompanyAncestry } from "./companyHierarchy.js";
+import { linkedCompanyIds, MAX_COMPANY_LINKS, normalizeCompanyLinks, sharesCompany } from "./companyLinks.js";
 
 const entityNames = ["clients", "projects", "companies", "drivers", "vehicles", "accessProfiles"] as const;
 type EntityName = typeof entityNames[number];
+
+const companyLinksSchema = z.array(firestoreId).max(MAX_COMPANY_LINKS, `Selecione no máximo ${MAX_COMPANY_LINKS} empresas.`).optional();
 
 const schemas: Record<EntityName, ZodType> = {
   clients: z.object({ name: z.string().trim().min(2).max(140), legalName: z.string().trim().min(2).max(180), document: cnpj, active }),
@@ -19,11 +23,10 @@ const schemas: Record<EntityName, ZodType> = {
     email: z.union([z.email(), z.literal("")]).optional().default(""), contractNumber: z.string().trim().max(80).optional().default(""), contractType: z.enum(["direct", "subcontractor"]),
     contractStart: optionalDateOnly, contractEnd: optionalDateOnly, projectIds: z.array(firestoreId).default([]), active
   }).superRefine((value, context) => {
-    if (value.contractType === "subcontractor" && !value.parentCompanyId) context.addIssue({ code: "custom", path: ["parentCompanyId"], message: "Informe a empresa contratante." });
     if (value.contractStart && value.contractEnd && value.contractEnd < value.contractStart) context.addIssue({ code: "custom", path: ["contractEnd"], message: "A data final deve ser posterior à inicial." });
   }),
-  drivers: z.object({ companyId: firestoreId, name: z.string().trim().min(2).max(160), registration: z.string().trim().min(1).max(60), jobTitle: z.string().trim().max(100).optional().default(""), licenseCategory: z.string().trim().min(1).max(10), licenseNumber: z.string().trim().max(40).optional().default(""), licenseExpiry: dateOnly, provisionalLicense: z.boolean().default(false), active }),
-  vehicles: z.object({ companyId: firestoreId, projectId: firestoreId, accessProfileId: firestoreId, plate: z.string().transform(normalizePlate).pipe(z.string().min(7).max(8)), brand: z.string().trim().min(1).max(80), model: z.string().trim().min(1).max(100), year: z.coerce.number().int().min(1950).max(2200), type: z.string().trim().min(1).max(60), color: z.string().trim().max(50).optional().default(""), fuel: z.string().trim().max(50).optional().default(""), mileage: z.coerce.number().int().nonnegative(), ownership: z.enum(["owned", "rented"]), rentalCompany: z.string().trim().max(160).optional().default(""), driverIds: z.array(firestoreId).default([]), active }),
+  drivers: z.object({ companyId: optionalFirestoreId, companyIds: companyLinksSchema, name: z.string().trim().min(2).max(160), registration: z.string().trim().min(1).max(60), jobTitle: z.string().trim().max(100).optional().default(""), licenseCategory: z.string().trim().min(1).max(10), licenseNumber: z.string().trim().max(40).optional().default(""), licenseExpiry: dateOnly, provisionalLicense: z.boolean().default(false), active }),
+  vehicles: z.object({ companyId: optionalFirestoreId, companyIds: companyLinksSchema, projectId: firestoreId, accessProfileId: firestoreId, plate: z.string().transform(normalizePlate).pipe(z.string().min(7).max(8)), brand: z.string().trim().min(1).max(80), model: z.string().trim().min(1).max(100), year: z.coerce.number().int().min(1950).max(2200), type: z.string().trim().min(1).max(60), color: z.string().trim().max(50).optional().default(""), fuel: z.string().trim().max(50).optional().default(""), mileage: z.coerce.number().int().nonnegative(), ownership: z.enum(["owned", "rented"]), rentalCompany: z.string().trim().max(160).optional().default(""), driverIds: z.array(firestoreId).default([]), active }),
   accessProfiles: z.object({ clientId: optionalFirestoreId, name: z.string().trim().min(2).max(100), description: z.string().trim().max(500).optional().default(""), color: z.string().regex(/^#[0-9A-Fa-f]{6}$/), gates: z.array(z.string().trim().min(1).max(100)).default([]), areas: z.array(z.string().trim().min(1).max(100)).default([]), active })
 };
 
@@ -36,7 +39,14 @@ function validationError(error: z.ZodError): never {
 function parseEntity(entity: EntityName, input: unknown, _current?: DocumentData): Record<string, unknown> {
   const result = schemas[entity].safeParse(input);
   if (!result.success) validationError(result.error);
-  return result.data as Record<string, unknown>;
+  const data = result.data as Record<string, unknown>;
+  if (entity === "companies" && data.contractType === "direct") data.parentCompanyId = undefined;
+  if (entity === "drivers" || entity === "vehicles") {
+    const links = normalizeCompanyLinks(data.companyId, data.companyIds);
+    if (!links) throw new HttpsError("invalid-argument", "Revise os campos informados.", { fieldErrors: { companyIds: ["Selecione ao menos uma empresa."] } });
+    Object.assign(data, links);
+  }
+  return data;
 }
 
 function writeData(entity: EntityName, data: Record<string, unknown>, updating: boolean) {
@@ -51,7 +61,8 @@ function uniqueKeys(entity: EntityName, data: Record<string, unknown>): string[]
   if (entity === "clients" || entity === "companies") return [`cnpj:${data.document}`];
   if (entity === "projects") return [`project-code:${data.clientId}:${normalizeCode(data.code)}`];
   if (entity === "vehicles") return [`plate:${normalizePlate(data.plate)}`];
-  if (entity === "drivers") return [`driver-registration:${data.companyId}:${normalizeCode(data.registration)}`];
+  // A matrícula continua única por empresa: é reservada em cada empresa vinculada ao motorista.
+  if (entity === "drivers") return linkedCompanyIds(data).map((companyId) => `driver-registration:${companyId}:${normalizeCode(data.registration)}`);
   return [];
 }
 
@@ -62,47 +73,74 @@ async function validateRelationships(transaction: Transaction, entity: EntityNam
     if (!client.exists || client.data()?.active !== true) throw new HttpsError("failed-precondition", "O cliente informado não existe ou está inativo.");
   }
   if (entity === "companies") {
-    if (data.parentCompanyId) {
-      if (data.parentCompanyId === id) throw new HttpsError("failed-precondition", "Uma empresa não pode contratar a si própria.");
-      const parent = await read("companies", data.parentCompanyId);
-      if (!parent.exists || parent.data()?.active !== true || parent.data()?.clientId !== data.clientId) throw new HttpsError("failed-precondition", "A empresa contratante deve estar ativa e pertencer ao mesmo cliente.");
-    }
+    await validateCompanyAncestry(id, data.parentCompanyId, data.clientId, async (parentId) => (await read("companies", parentId)).data());
     const projects = await Promise.all((data.projectIds as string[]).map((projectId) => read("projects", projectId)));
     if (projects.some((project) => !project.exists || project.data()?.active !== true || project.data()?.clientId !== data.clientId)) throw new HttpsError("failed-precondition", "Todos os projetos devem estar ativos e pertencer ao cliente da empresa.");
   }
   if (entity === "drivers") {
-    const company = await read("companies", data.companyId);
-    if (!company.exists || company.data()?.active !== true) throw new HttpsError("failed-precondition", "A empresa informada não existe ou está inativa.");
+    const [vehicles, ...companies] = await Promise.all([
+      transaction.get(firestore.collection("vehicles").where("driverIds", "array-contains", id)),
+      ...(data.companyIds as string[]).map((companyId) => read("companies", companyId))
+    ]);
+    if (companies.some((company) => !company.exists || company.data()?.active !== true)) throw new HttpsError("failed-precondition", "Todas as empresas vinculadas devem existir e estar ativas.");
+    const orphaned = vehicles.docs.find((vehicle) => vehicle.data().active === true && !sharesCompany(vehicle.data(), data));
+    if (orphaned) throw new HttpsError("failed-precondition", `O motorista está vinculado ao veículo ${orphaned.data().plate || orphaned.id}, que não atende nenhuma das empresas selecionadas. Remova o motorista do veículo antes de retirar a empresa.`);
   }
   if (entity === "vehicles") {
-    const [company, project, profile, ...drivers] = await Promise.all([
-      read("companies", data.companyId), read("projects", data.projectId), read("accessProfiles", data.accessProfileId),
+    const companyIds = data.companyIds as string[];
+    const [project, profile, ...related] = await Promise.all([
+      read("projects", data.projectId), read("accessProfiles", data.accessProfileId),
+      ...companyIds.map((companyId) => read("companies", companyId)),
       ...(data.driverIds as string[]).map((driverId) => read("drivers", driverId))
     ]);
-    if (!company.exists || company.data()?.active !== true) throw new HttpsError("failed-precondition", "A empresa informada não existe ou está inativa.");
-    if (!project.exists || project.data()?.active !== true || !(company.data()?.projectIds || []).includes(project.id)) throw new HttpsError("failed-precondition", "O projeto não está autorizado para esta empresa.");
-    if (!profile.exists || profile.data()?.active !== true || (profile.data()?.clientId && profile.data()?.clientId !== company.data()?.clientId)) throw new HttpsError("failed-precondition", "O perfil de acesso não é compatível com o cliente da empresa.");
-    if (drivers.some((driver) => !driver.exists || driver.data()?.active !== true || driver.data()?.companyId !== company.id)) throw new HttpsError("failed-precondition", "Todos os motoristas devem estar ativos e pertencer à empresa do veículo.");
+    const companies = related.slice(0, companyIds.length);
+    const drivers = related.slice(companyIds.length);
+    if (companies.some((company) => !company.exists || company.data()?.active !== true)) throw new HttpsError("failed-precondition", "Todas as empresas vinculadas devem existir e estar ativas.");
+    if (!project.exists || project.data()?.active !== true || !companies.some((company) => (company.data()?.projectIds || []).includes(project.id))) throw new HttpsError("failed-precondition", "O projeto não está autorizado para nenhuma das empresas vinculadas.");
+    const profileClientId = profile.data()?.clientId;
+    if (!profile.exists || profile.data()?.active !== true || (profileClientId && companies.some((company) => company.data()?.clientId !== profileClientId))) throw new HttpsError("failed-precondition", "O perfil de acesso não é compatível com o cliente de todas as empresas vinculadas.");
+    if (drivers.some((driver) => !driver.exists || driver.data()?.active !== true || !sharesCompany(driver.data(), data))) throw new HttpsError("failed-precondition", "Todos os motoristas devem estar ativos e atender ao menos uma das empresas do veículo.");
   }
 }
 
-interface ExistingAssignments { companyProjects: FirebaseFirestore.QueryDocumentSnapshot[]; vehicleProjects: FirebaseFirestore.QueryDocumentSnapshot[]; vehicleDrivers: FirebaseFirestore.QueryDocumentSnapshot[] }
+interface ExistingAssignments {
+  companyProjects: FirebaseFirestore.QueryDocumentSnapshot[]; vehicleProjects: FirebaseFirestore.QueryDocumentSnapshot[]; vehicleDrivers: FirebaseFirestore.QueryDocumentSnapshot[];
+  vehicleCompanies: FirebaseFirestore.QueryDocumentSnapshot[]; driverCompanies: FirebaseFirestore.QueryDocumentSnapshot[];
+}
 
 async function loadAssignments(transaction: Transaction, entity: EntityName, id: string): Promise<ExistingAssignments> {
-  const empty: ExistingAssignments = { companyProjects: [], vehicleProjects: [], vehicleDrivers: [] };
+  const empty: ExistingAssignments = { companyProjects: [], vehicleProjects: [], vehicleDrivers: [], vehicleCompanies: [], driverCompanies: [] };
   if (entity === "companies") return { ...empty, companyProjects: (await transaction.get(firestore.collection("companyProjectAssignments").where("companyId", "==", id))).docs };
+  if (entity === "drivers") return { ...empty, driverCompanies: (await transaction.get(firestore.collection("driverCompanyAssignments").where("driverId", "==", id))).docs };
   if (entity === "vehicles") {
-    const [projects, drivers] = await Promise.all([
+    const [projects, drivers, companies] = await Promise.all([
       transaction.get(firestore.collection("vehicleProjectAssignments").where("vehicleId", "==", id)),
-      transaction.get(firestore.collection("vehicleDriverAssignments").where("vehicleId", "==", id))
+      transaction.get(firestore.collection("vehicleDriverAssignments").where("vehicleId", "==", id)),
+      transaction.get(firestore.collection("vehicleCompanyAssignments").where("vehicleId", "==", id))
     ]);
-    return { ...empty, vehicleProjects: projects.docs, vehicleDrivers: drivers.docs };
+    return { ...empty, vehicleProjects: projects.docs, vehicleDrivers: drivers.docs, vehicleCompanies: companies.docs };
   }
   return empty;
 }
 
+// Vínculos de empresa preservam o histórico: vínculos removidos ficam com active=false e endedAt.
+function syncCompanyAssignments(transaction: Transaction, collectionName: "vehicleCompanyAssignments" | "driverCompanyAssignments", ownerField: "vehicleId" | "driverId", id: string, data: Record<string, unknown>, user: AppUser, existing: FirebaseFirestore.QueryDocumentSnapshot[]) {
+  const stamp = serverTimestamp();
+  const selected = data.companyIds as string[];
+  for (const assignment of existing.filter((item) => !selected.includes(String(item.data().companyId)) && item.data().active !== false)) transaction.set(assignment.ref, { active: false, endedAt: stamp, updatedAt: stamp, updatedBy: user.id }, { merge: true });
+  for (const companyId of selected) {
+    const primary = companyId === data.companyId;
+    const alreadyActive = existing.some((item) => String(item.data().companyId) === companyId && item.data().active !== false);
+    transaction.set(firestore.collection(collectionName).doc(`${id}_${companyId}`), {
+      [ownerField]: id, companyId, primary, active: true, endedAt: FieldValue.delete(), ...(alreadyActive ? {} : { startedAt: stamp }), updatedAt: stamp, updatedBy: user.id
+    }, { merge: true });
+  }
+}
+
 function syncAssignments(transaction: Transaction, entity: EntityName, id: string, data: Record<string, unknown>, user: AppUser, existing: ExistingAssignments) {
   const stamp = serverTimestamp();
+  if (entity === "drivers") syncCompanyAssignments(transaction, "driverCompanyAssignments", "driverId", id, data, user, existing.driverCompanies);
+  if (entity === "vehicles") syncCompanyAssignments(transaction, "vehicleCompanyAssignments", "vehicleId", id, data, user, existing.vehicleCompanies);
   if (entity === "companies") {
     const selected = data.projectIds as string[];
     for (const assignment of existing.companyProjects.filter((item) => !selected.includes(String(item.data().projectId)))) transaction.set(assignment.ref, { active: false, endedAt: stamp, updatedAt: stamp, updatedBy: user.id }, { merge: true });

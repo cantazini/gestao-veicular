@@ -41,6 +41,16 @@ service firebase.storage {
       allow write: if admin() && validImage(5 * 1024 * 1024);
     }
 
+    match /companies/{companyId}/branding/{fileName} {
+      allow read: if operational();
+      allow write: if operational() && validImage(5 * 1024 * 1024);
+    }
+
+    match /vehicles/{vehicleId}/cover/{fileName} {
+      allow read: if operational();
+      allow write: if operational() && validImage(5 * 1024 * 1024);
+    }
+
     match /documents/{entityType}/{entityId}/{documentId}/{fileName} {
       allow read: if operational();
       allow write: if operational()

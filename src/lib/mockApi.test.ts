@@ -107,6 +107,29 @@ describe("documentos integrados", () => {
     await mockRequest(`/clients/${client.id}/logo`, { method: "DELETE" });
     expect((await mockRequest<PageResult<Entity>>("/clients")).items.find((item) => item.id === client.id)?.logoBlobPath).toBeNull();
   });
+
+  it("substitui e remove a logo opcional da empresa", async () => {
+    const companies = await mockRequest<PageResult<Entity>>("/companies");
+    const company = companies.items[0];
+    const logoPath = `companies/${company.id}/branding/logo.png`;
+    await mockRequest("/files/complete", { method: "POST", body: JSON.stringify({ kind: "company-branding", entityId: company.id, blobPath: logoPath, fileName: "logo.png", mimeType: "image/png", size: 1000 }) });
+    expect((await mockRequest<PageResult<Entity>>("/companies")).items.find((item) => item.id === company.id)?.logoBlobPath).toBe(logoPath);
+    await mockRequest(`/companies/${company.id}/logo`, { method: "DELETE" });
+    expect((await mockRequest<PageResult<Entity>>("/companies")).items.find((item) => item.id === company.id)?.logoBlobPath).toBeNull();
+  });
+
+  it("adiciona, substitui e remove a foto de capa opcional do veículo", async () => {
+    const vehicles = await mockRequest<PageResult<Entity>>("/vehicles");
+    const vehicle = vehicles.items[0];
+    const firstPath = `vehicles/${vehicle.id}/cover/primeira.jpg`;
+    const replacementPath = `vehicles/${vehicle.id}/cover/substituta.png`;
+    await mockRequest("/files/complete", { method: "POST", body: JSON.stringify({ kind: "vehicle-cover", entityId: vehicle.id, blobPath: firstPath, fileName: "primeira.jpg", mimeType: "image/jpeg", size: 1000 }) });
+    expect((await mockRequest<PageResult<Entity>>("/vehicles")).items.find((item) => item.id === vehicle.id)?.coverBlobPath).toBe(firstPath);
+    await mockRequest("/files/complete", { method: "POST", body: JSON.stringify({ kind: "vehicle-cover", entityId: vehicle.id, blobPath: replacementPath, fileName: "substituta.png", mimeType: "image/png", size: 1000 }) });
+    expect((await mockRequest<PageResult<Entity>>("/vehicles")).items.find((item) => item.id === vehicle.id)?.coverBlobPath).toBe(replacementPath);
+    await mockRequest(`/vehicles/${vehicle.id}/cover`, { method: "DELETE" });
+    expect((await mockRequest<PageResult<Entity>>("/vehicles")).items.find((item) => item.id === vehicle.id)?.coverBlobPath).toBeNull();
+  });
 });
 
 describe("credenciais com vínculos cadastrados", () => {

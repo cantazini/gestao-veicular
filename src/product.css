@@ -47,6 +47,8 @@ button, input, select, textarea { font-feature-settings: "cv02", "cv03", "cv04",
 .button { min-height: 43px; border-radius: 10px; padding-inline: 17px; }
 .button.primary { background: linear-gradient(135deg, #0862aa, #07528f); box-shadow: 0 7px 18px rgba(7, 86, 156, .2); }
 .button.primary:hover { background: linear-gradient(135deg, #075793, #06487e); box-shadow: 0 9px 22px rgba(7, 86, 156, .25); }
+.button.danger { background: linear-gradient(135deg, #b64e49, #983d3a); color: #fff; box-shadow: 0 7px 18px rgba(164,71,67,.2); }
+.button.danger:hover { background: linear-gradient(135deg, #a74440, #883431); box-shadow: 0 9px 22px rgba(164,71,67,.25); }
 .button.ghost:hover, .button.secondary:hover { background: #f3f7fb; border-color: #a9c5dc; }
 input, select, textarea { min-height: 43px; border-radius: 9px; border-color: #cfdae5; }
 textarea { resize: vertical; line-height: 1.5; }
@@ -98,6 +100,8 @@ td { padding-block: 14px; }
 .multi-select-list input { min-height: 0; width: 16px!important; height: 16px; margin: 0; accent-color: var(--primary); }
 .multi-select-list.disabled { background: #f1f4f7; }
 .multi-select-empty { grid-column: 1/-1; align-self: center; padding: 8px; color: #8794a3; font-weight: 450; }
+.multi-select-filter { width: 100%; min-height: 38px; margin-bottom: 6px; }
+.multi-select-count { display: block; margin-top: 5px; color: #718096; font-size: 11px; }
 .color-field { min-height: 43px; display: flex; align-items: center; gap: 10px; padding: 5px 10px; border: 1px solid #cfdae5; border-radius: 9px; }
 .color-field input { width: 31px!important; min-height: 30px; height: 30px; border: 0; padding: 0; background: transparent; }
 .color-field span { font-family: ui-monospace, Consolas, monospace; color: #57697b; font-weight: 600; }
@@ -149,6 +153,17 @@ td { padding-block: 14px; }
 .stepper button small { font-size: 10px; }
 .stepper button span { width: 27px; height: 27px; }
 .stepper button.active span { box-shadow: 0 0 0 5px rgba(7,90,156,.1); }
+/* Stepper no desktop: círculo e label ficam lado a lado, então o conector acompanha o fluxo (label → linha → próximo círculo).
+   O conector centro a centro (styles.css) continua valendo somente no mobile, onde o label fica oculto. */
+@media (min-width: 561px) {
+  .stepper { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: center; }
+  .stepper button { min-width: 0; padding: 0; gap: 9px; justify-content: flex-start; }
+  .stepper button:before { display: none; }
+  .stepper button:not(:last-child):after { content: ""; flex: 1 1 auto; min-width: 16px; height: 1px; margin: 0 12px 0 3px; background: #d9e1eb; }
+  .stepper button.done:not(:last-child):after { background: var(--primary); }
+  .stepper button span { flex: none; font-size: 12px; line-height: 1; }
+  .stepper button small { flex: none; white-space: nowrap; line-height: 1.2; }
+}
 .inspection-card { border-radius: 17px; padding: 30px; }
 .section-kicker { display: block; margin-bottom: 6px; color: #3d79a8; font-size: 9px; font-weight: 850; text-transform: uppercase; letter-spacing: .12em; }
 .section-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; }
@@ -188,6 +203,27 @@ td { padding-block: 14px; }
 .inspection-filter-grid { display: grid; grid-template-columns: repeat(4,minmax(150px,1fr)); gap: 14px; margin-bottom: 14px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .inspection-filter-grid .field > span { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .inspection-filter-actions { margin-bottom: 18px; }
+.inspection-delete-summary { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-bottom: 18px; padding: 15px; border: 1px solid #e3e9ef; border-radius: 11px; background: #f8fafc; }
+.inspection-delete-summary div { display: grid; gap: 3px; }
+.inspection-delete-summary span { color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.inspection-delete-summary strong { color: #263c50; font-size: 12px; }
+.inspection-delete-warning { margin-bottom: 17px; color: #6d4a48; font-size: 12px; line-height: 1.55; }
+.inspection-delete-warning strong { color: var(--danger); }
+.sequence-field-warning { color: var(--danger); font-weight: 700; }
+
+/* Dashboard: indicadores de documentos na mesma linguagem do card de alerta. */
+.document-alerts { display: grid; grid-auto-rows: 1fr; gap: 12px; align-content: stretch; min-width: 0; }
+.document-alerts .alert-card { justify-content: center; padding: 18px; color: inherit; text-decoration: none; transition: border-color .18s ease, box-shadow .18s ease; }
+.document-alerts .alert-card:hover { border-color: #cbd9e7; box-shadow: 0 10px 26px rgba(26,52,82,.09); }
+.document-alerts .alert-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.document-alerts .alert-card .alert-icon { width: 40px; height: 40px; border-radius: 12px; }
+.document-alerts .alert-card .alert-icon svg { width: 19px; }
+.document-alerts .alert-card h2 { margin: 14px 0 8px; font-size: 14px; }
+.document-alerts .alert-card > strong { font-size: 30px; line-height: 1.1; }
+.document-alerts .alert-card.success .alert-icon { background: #e7f4ed; color: var(--success); }
+.document-alerts .alert-card.success > strong { color: var(--success); }
+.document-alerts .alert-card.danger .alert-icon { background: #fbeceb; color: var(--danger); }
+.document-alerts .alert-card.danger > strong { color: var(--danger); }
 
 @media (max-width: 1050px) {
   .login-card { grid-template-columns: 1fr 400px; }
@@ -218,6 +254,7 @@ td { padding-block: 14px; }
   .modal-body { padding: 20px; }
   .modal-header, .modal-footer { padding-inline: 20px; }
   .inspection-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .document-alerts { grid-template-columns: repeat(3,minmax(0,1fr)); }
 }
 
 @media (max-width: 560px) {
@@ -249,6 +286,7 @@ td { padding-block: 14px; }
   .modal { width: 100%; max-height: 96dvh; border-radius: 18px 18px 0 0; border-bottom: 0; }
   .modal-footer .button { flex: 1; }
   .inspection-filter-grid { grid-template-columns: 1fr; }
+  .document-alerts { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

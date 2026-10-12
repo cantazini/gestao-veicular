@@ -6,10 +6,11 @@ import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { CHECKLIST_GROUPS, newChecklist } from "../data/checklist";
 import { api, mockMode } from "../lib/api";
+import { isLinkedToCompany } from "../lib/companyLinks";
 import { currentTime, today } from "../lib/format";
 import { prepareImage, type PreparedImage } from "../lib/images";
 import { uploadManagedFile } from "../lib/files";
-import type { ChecklistStatus, Entity, Inspection, PageResult } from "../types";
+import type { ChecklistStatus, Entity, Inspection, InspectionSequenceSummary, PageResult } from "../types";
 
 const photoSlots = [["front", "Frontal"], ["rear", "Traseira"], ["left", "Lateral esquerda"], ["right", "Lateral direita"], ["cabin", "Cabine / interior"], ["dashboard", "Painel"], ["additional-1", "Adicional 1"], ["additional-2", "Adicional 2"]] as const;
 const steps = ["Identificação", "Checklist", "Fotografias", "Revisão"];
@@ -21,7 +22,9 @@ export function NewInspection() {
   const editing = Boolean(inspectionId);
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ companyId: "", projectId: "", vehicleId: "", driverId: "", inspectionDate: today(), inspectionTime: currentTime(), mileage: 0, generalObservations: "" });
+  const [form, setForm] = useState({ companyId: "", projectId: "", vehicleId: "", driverId: "", inspectionDate: today(), inspectionTime: currentTime(), mileage: 0, sequence: "", generalObservations: "" });
+  // A sequência por veículo é sugerida automaticamente até o usuário alterá-la manualmente.
+  const [sequenceEdited, setSequenceEdited] = useState(false);
   const [items, setItems] = useState(newChecklist());
   const [photos, setPhotos] = useState<Record<string, PreparedImage>>({});
   const [extraPhotoSlots, setExtraPhotoSlots] = useState<Array<[string, string]>>([]);
@@ -41,7 +44,8 @@ export function NewInspection() {
   useEffect(() => {
     const current = existingInspection.data;
     if (!current || hydrated) return;
-    setForm({ companyId: current.companyId || "", projectId: current.projectId || "", vehicleId: current.vehicleId || "", driverId: current.driverId || "", inspectionDate: current.inspectionDate, inspectionTime: current.inspectionTime, mileage: current.mileage, generalObservations: current.generalObservations || "" });
+    setForm({ companyId: current.companyId || "", projectId: current.projectId || "", vehicleId: current.vehicleId || "", driverId: current.driverId || "", inspectionDate: current.inspectionDate, inspectionTime: current.inspectionTime, mileage: current.mileage, sequence: current.sequence ? String(current.sequence) : "", generalObservations: current.generalObservations || "" });
+    setSequenceEdited(Boolean(current.sequence));
     if (current.items?.length) setItems(current.items);
     setHydrated(true);
   }, [existingInspection.data, hydrated]);
@@ -58,9 +62,29 @@ export function NewInspection() {
   const selectedDriver = drivers.find((driver) => driver.id === form.driverId);
   const companyProjectIds = (selectedCompany?.projectIds as string[] || []);
   const filteredProjects = projects.filter((project) => companyProjectIds.includes(project.id));
-  const filteredVehicles = vehicles.filter((vehicle) => vehicle.companyId === form.companyId && (!form.projectId || vehicle.projectId === form.projectId));
+  // Veículos e motoristas podem atender várias empresas: aparecem para cada empresa com vínculo ativo.
+  const filteredVehicles = vehicles.filter((vehicle) => isLinkedToCompany(vehicle, form.companyId) && (!form.projectId || vehicle.projectId === form.projectId));
   const vehicleDriverIds = (selectedVehicle?.driverIds as string[] || []);
-  const filteredDrivers = drivers.filter((driver) => driver.companyId === form.companyId && vehicleDriverIds.includes(driver.id));
+  const filteredDrivers = drivers.filter((driver) => isLinkedToCompany(driver, form.companyId) && vehicleDriverIds.includes(driver.id));
+  const sequenceQuery = useQuery({
+    queryKey: ["inspection-sequence", form.vehicleId, inspectionId || ""],
+    queryFn: () => api<InspectionSequenceSummary>(`/inspections/sequence?vehicleId=${encodeURIComponent(form.vehicleId)}${inspectionId ? `&excludeId=${encodeURIComponent(inspectionId)}` : ""}`),
+    enabled: Boolean(form.vehicleId), retry: false
+  });
+  const sequenceSuggestion = sequenceQuery.data;
+  useEffect(() => {
+    if (sequenceEdited || !sequenceSuggestion) return;
+    setForm((current) => current.sequence === String(sequenceSuggestion.nextSequence) ? current : { ...current, sequence: String(sequenceSuggestion.nextSequence) });
+  }, [sequenceEdited, sequenceSuggestion]);
+  const sequenceNumber = Number(form.sequence);
+  const sequenceFormatValid = form.sequence === "" || (Number.isInteger(sequenceNumber) && sequenceNumber >= 1 && sequenceNumber <= 9999);
+  const sequenceTaken = Boolean(form.sequence) && Boolean(sequenceSuggestion?.usedSequences.includes(sequenceNumber));
+  const sequenceIsValid = sequenceFormatValid && !sequenceTaken;
+  const sequenceHelp = !form.vehicleId ? "Disponível após selecionar o veículo."
+    : sequenceTaken ? <span className="sequence-field-warning">Já existe a {sequenceNumber}ª vistoria para este veículo. Informe outra sequência.</span>
+    : !sequenceFormatValid ? <span className="sequence-field-warning">Informe um número inteiro entre 1 e 9999.</span>
+    : sequenceSuggestion ? `Sugestão: ${sequenceSuggestion.nextSequence}ª. ${sequenceSuggestion.usedSequences.length ? `Já registradas: ${sequenceSuggestion.usedSequences.map((item) => `${item}ª`).join(", ")}.` : "Primeira vistoria deste veículo."} Altere para lançar uma vistoria retroativa.`
+    : sequenceQuery.isError ? "Não foi possível sugerir a sequência; se ficar vazio, o sistema atribui a próxima." : "Calculando a próxima sequência…";
 
   const summary = useMemo(() => {
     const applicable = items.filter((item) => item.status !== "nao_se_aplica");
@@ -74,7 +98,7 @@ export function NewInspection() {
       const missingObservation = items.find((item) => item.status === "nao_conforme" && !item.observation.trim());
       if (missingObservation) throw new Error(`Descreva a não conformidade em “${missingObservation.label}”.`);
       const localPhotos = mockMode ? Object.entries(photos).map(([type, photo]) => ({ id: crypto.randomUUID(), photoType: type, label: allPhotoSlots.find((slot) => slot[0] === type)?.[1] || "Fotografia", url: photo.preview })) : undefined;
-      const inspection = await api<Inspection>(editing ? `/inspections/${inspectionId}` : "/inspections", { method: editing ? "PUT" : "POST", body: JSON.stringify({ ...form, mileage: Number(form.mileage), items, ...(localPhotos ? { photos: localPhotos } : {}) }) });
+      const inspection = await api<Inspection>(editing ? `/inspections/${inspectionId}` : "/inspections", { method: editing ? "PUT" : "POST", body: JSON.stringify({ ...form, mileage: Number(form.mileage), sequence: form.sequence === "" ? undefined : Number(form.sequence), items, ...(localPhotos ? { photos: localPhotos } : {}) }) });
       if (!mockMode) {
         for (const [type, image] of Object.entries(photos)) {
           const photoLabel = allPhotoSlots.find((slot) => slot[0] === type)?.[1] || "Fotografia";
@@ -91,7 +115,8 @@ export function NewInspection() {
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ["inspections"], refetchType: "all" }),
         queryClient.invalidateQueries({ queryKey: ["dashboard"], refetchType: "all" }),
-        queryClient.invalidateQueries({ queryKey: ["vehicles"], refetchType: "all" })
+        queryClient.invalidateQueries({ queryKey: ["vehicles"], refetchType: "all" }),
+        queryClient.invalidateQueries({ queryKey: ["inspection-sequence"], refetchType: "all" })
       ]);
       navigate(`/vistorias/${inspection.id}`);
     },
@@ -110,8 +135,8 @@ export function NewInspection() {
   };
 
   const mileageIsValid = editing || Number(form.mileage) >= Number(selectedVehicle?.mileage || 0);
-  const canNext = step !== 1 || Boolean(form.companyId && form.projectId && form.vehicleId && form.driverId && form.inspectionDate && form.inspectionTime && mileageIsValid);
-  const nextHint = step === 1 && !canNext ? !form.companyId ? "Comece selecionando a empresa." : !form.projectId ? "Selecione um projeto autorizado." : !form.vehicleId ? "Selecione um veículo do projeto." : !form.driverId ? "Selecione um motorista vinculado ao veículo." : !mileageIsValid ? "A quilometragem não pode ser menor que o último registro." : "Preencha data e hora." : "";
+  const canNext = step !== 1 || Boolean(form.companyId && form.projectId && form.vehicleId && form.driverId && form.inspectionDate && form.inspectionTime && mileageIsValid && sequenceIsValid);
+  const nextHint = step === 1 && !canNext ? !form.companyId ? "Comece selecionando a empresa." : !form.projectId ? "Selecione um projeto autorizado." : !form.vehicleId ? "Selecione um veículo do projeto." : !form.driverId ? "Selecione um motorista vinculado ao veículo." : !mileageIsValid ? "A quilometragem não pode ser menor que o último registro." : !sequenceIsValid ? "Revise a sequência da vistoria." : "Preencha data e hora." : "";
 
   return <>
     <PageHeader eyebrow="Vistorias" title={editing ? "Editar vistoria" : "Nova vistoria"} description={editing ? "Revise os dados concluídos. O resultado será recalculado e aprovações de credencial serão invalidadas." : "Registre a identificação, execute o checklist e anexe evidências em um fluxo guiado."}/>
@@ -133,13 +158,14 @@ export function NewInspection() {
           <Dependency icon={<UserRound/>} label="Motorista" value={label(selectedDriver)} ready={Boolean(selectedDriver)}/>
         </div>
         <div className="form-grid inspection-fields">
-          <Field label="Empresa" required help="Selecione a organização responsável pela operação."><select value={form.companyId} onChange={(event) => { setError(""); setForm({ ...form, companyId: event.target.value, projectId: "", vehicleId: "", driverId: "", mileage: 0 }); }}><option value="">Selecione uma empresa</option>{companies.map((item) => <option key={item.id} value={item.id}>{label(item)}</option>)}</select></Field>
-          <Field label="Projeto" required help={!form.companyId ? "Disponível após selecionar a empresa." : !filteredProjects.length ? "Nenhum projeto autorizado para esta empresa." : "Projetos vinculados à empresa selecionada."}><select value={form.projectId} disabled={!form.companyId} onChange={(event) => { setError(""); setForm({ ...form, projectId: event.target.value, vehicleId: "", driverId: "", mileage: 0 }); }}><option value="">Selecione um projeto</option>{filteredProjects.map((item) => <option key={item.id} value={item.id}>{label(item)}</option>)}</select></Field>
-          <Field label="Veículo" required help={!form.projectId ? "Disponível após selecionar o projeto." : !filteredVehicles.length ? "Nenhum veículo ativo neste projeto." : "A lista respeita empresa e projeto."}><select value={form.vehicleId} disabled={!form.projectId} onChange={(event) => { const vehicle = vehicles.find((item) => item.id === event.target.value); setError(""); setForm({ ...form, vehicleId: event.target.value, projectId: String(vehicle?.projectId || form.projectId), mileage: Number(vehicle?.mileage || 0), driverId: "" }); }}><option value="">Selecione um veículo</option>{filteredVehicles.map((item) => <option key={item.id} value={item.id}>{item.plate} · {item.brand} {item.model}</option>)}</select></Field>
+          <Field label="Empresa" required help="Selecione a organização responsável pela operação."><select value={form.companyId} onChange={(event) => { setError(""); setSequenceEdited(false); setForm({ ...form, companyId: event.target.value, projectId: "", vehicleId: "", driverId: "", mileage: 0, sequence: "" }); }}><option value="">Selecione uma empresa</option>{companies.map((item) => <option key={item.id} value={item.id}>{label(item)}</option>)}</select></Field>
+          <Field label="Projeto" required help={!form.companyId ? "Disponível após selecionar a empresa." : !filteredProjects.length ? "Nenhum projeto autorizado para esta empresa." : "Projetos vinculados à empresa selecionada."}><select value={form.projectId} disabled={!form.companyId} onChange={(event) => { setError(""); setSequenceEdited(false); setForm({ ...form, projectId: event.target.value, vehicleId: "", driverId: "", mileage: 0, sequence: "" }); }}><option value="">Selecione um projeto</option>{filteredProjects.map((item) => <option key={item.id} value={item.id}>{label(item)}</option>)}</select></Field>
+          <Field label="Veículo" required help={!form.projectId ? "Disponível após selecionar o projeto." : !filteredVehicles.length ? "Nenhum veículo ativo neste projeto." : "A lista respeita empresa e projeto."}><select value={form.vehicleId} disabled={!form.projectId} onChange={(event) => { const vehicle = vehicles.find((item) => item.id === event.target.value); setError(""); setSequenceEdited(false); setForm({ ...form, vehicleId: event.target.value, projectId: String(vehicle?.projectId || form.projectId), mileage: Number(vehicle?.mileage || 0), driverId: "", sequence: "" }); }}><option value="">Selecione um veículo</option>{filteredVehicles.map((item) => <option key={item.id} value={item.id}>{item.plate} · {item.brand} {item.model}</option>)}</select></Field>
           <Field label="Motorista" required help={!form.vehicleId ? "Disponível após selecionar o veículo." : !filteredDrivers.length ? "Nenhum motorista ativo está vinculado ao veículo." : "Somente condutores autorizados para este veículo."}><select value={form.driverId} disabled={!form.vehicleId} onChange={(event) => { setError(""); setForm({ ...form, driverId: event.target.value }); }}><option value="">Selecione um motorista</option>{filteredDrivers.map((item) => <option key={item.id} value={item.id}>{label(item)}</option>)}</select></Field>
           <Field label="Data" required><input type="date" value={form.inspectionDate} onChange={(event) => setForm({ ...form, inspectionDate: event.target.value })}/></Field>
           <Field label="Hora" required><input type="time" value={form.inspectionTime} onChange={(event) => setForm({ ...form, inspectionTime: event.target.value })}/></Field>
           <Field label="Quilometragem atual" required help={`Último registro: ${Number(selectedVehicle?.mileage || 0).toLocaleString("pt-BR")} km`}><input type="number" min={Number(selectedVehicle?.mileage || 0)} value={form.mileage} onChange={(event) => setForm({ ...form, mileage: Number(event.target.value) })}/></Field>
+          <Field label="Sequência da vistoria" required help={sequenceHelp}><input type="number" inputMode="numeric" min={1} max={9999} step={1} disabled={!form.vehicleId} aria-invalid={!sequenceIsValid || undefined} placeholder={form.vehicleId ? "Automática" : "Selecione um veículo"} value={form.sequence} onChange={(event) => { setSequenceEdited(true); setForm({ ...form, sequence: event.target.value.replace(/\D/g, "") }); }}/></Field>
         </div>
         {selectedVehicle && <div className="selection-summary"><div><span>Veículo selecionado</span><strong>{selectedVehicle.brand} {selectedVehicle.model}</strong></div><div><span>Placa</span><strong className="plate">{selectedVehicle.plate}</strong></div><div><span>Ano</span><strong>{selectedVehicle.year}</strong></div><div><span>Perfil de acesso</span><strong>{String(selectedVehicle.accessProfileName || "Configurado")}</strong></div></div>}
       </div>)}
@@ -158,7 +184,7 @@ export function NewInspection() {
       {step === 4 && <div>
         <div className="section-heading"><span className="section-kicker">Conferência final</span><h2>Revisão e resultado</h2><p>O percentual mínimo de aprovação é validado novamente pelo servidor.</p></div>
         <div className="review-result"><div className="progress-ring" style={{ "--value": `${summary.percentage * 3.6}deg` } as React.CSSProperties}><span>{summary.percentage}%</span></div><div><p>Resultado previsto conforme o parâmetro atual</p><h3 className={settings && summary.percentage >= settings.minimumInspectionCompliance ? "approved" : "rejected"}>{settings ? (summary.percentage >= settings.minimumInspectionCompliance ? "APROVADO" : "REPROVADO") : "VALIDANDO REGRA…"}</h3><span>{summary.compliant} conformes · {summary.nonCompliant} não conformes · {summary.notApplicable} não aplicáveis</span></div></div>
-        <div className="review-grid"><div><span>Empresa</span><strong>{label(selectedCompany)}</strong></div><div><span>Projeto</span><strong>{label(selectedProject)}</strong></div><div><span>Veículo</span><strong>{selectedVehicle?.plate} · {selectedVehicle?.model}</strong></div><div><span>Motorista</span><strong>{label(selectedDriver)}</strong></div><div><span>Data e hora</span><strong>{form.inspectionDate} · {form.inspectionTime}</strong></div><div><span>Quilometragem</span><strong>{Number(form.mileage).toLocaleString("pt-BR")} km</strong></div><div><span>Fotos</span><strong>{Object.keys(photos).length} anexada(s)</strong></div><div><span>Não conformidades</span><strong>{summary.nonCompliant}</strong></div></div>
+        <div className="review-grid"><div><span>Empresa</span><strong>{label(selectedCompany)}</strong></div><div><span>Projeto</span><strong>{label(selectedProject)}</strong></div><div><span>Veículo</span><strong>{selectedVehicle?.plate} · {selectedVehicle?.model}</strong></div><div><span>Motorista</span><strong>{label(selectedDriver)}</strong></div><div><span>Data e hora</span><strong>{form.inspectionDate} · {form.inspectionTime}</strong></div><div><span>Sequência</span><strong>{form.sequence ? `${form.sequence}ª vistoria` : "Automática"}</strong></div><div><span>Quilometragem</span><strong>{Number(form.mileage).toLocaleString("pt-BR")} km</strong></div><div><span>Fotos</span><strong>{Object.keys(photos).length} anexada(s)</strong></div><div><span>Não conformidades</span><strong>{summary.nonCompliant}</strong></div></div>
         <Field label="Observações gerais" help="Inclua somente informações relevantes para o relatório final."><textarea rows={5} value={form.generalObservations} onChange={(event) => setForm({ ...form, generalObservations: event.target.value })} placeholder="Informações adicionais sobre a vistoria"/></Field>
       </div>}
     </section>
@@ -171,7 +197,7 @@ export function NewInspection() {
   </>;
 }
 
-function Field({ label: fieldLabel, children, help, required = false }: { label: string; children: ReactNode; help?: string; required?: boolean }) {
+function Field({ label: fieldLabel, children, help, required = false }: { label: string; children: ReactNode; help?: ReactNode; required?: boolean }) {
   return <label className="field"><span>{fieldLabel}{required && <span className="required-mark" aria-label="obrigatório"> *</span>}</span>{children}{help && <small className="field-help">{help}</small>}</label>;
 }
 

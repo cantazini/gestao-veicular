@@ -56,6 +56,7 @@ export function ImportData() {
       ["CNPJ", "00.000.000/0000-00", "Informe um CNPJ matematicamente válido"],
       ["Validade_CNH", "2028-12-31", "Sempre AAAA-MM-DD"],
       ["Projetos_Codigos", "PRJ-01;PRJ-02", "Separe múltiplos valores por ponto e vírgula"],
+      ["Empresa_CNPJ (Motoristas e Veículos)", "00.000.000/0000-00;11.111.111/0001-11", "Um ou mais CNPJs, separados por ponto e vírgula, quando o motorista ou veículo atende várias empresas. A primeira é a principal."],
       ["Ativo", "Sim", "Use Sim ou Não"],
       ["Tipo_Contrato", "Direto", "Use Direto ou Subcontratado"],
       ["Propriedade", "Próprio", "Use Próprio ou Locado"]

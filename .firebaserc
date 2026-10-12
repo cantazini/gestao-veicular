@@ -1,5 +1,18 @@
 {
   "projects": {
     "default": "gestaoveicular-47777"
-  }
+  },
+  "targets": {
+    "gestaoveicular-47777": {
+      "storage": {
+        "app": [
+          "gestaoveicular-47777-files-sp"
+        ],
+        "default-deny": [
+          "gestaoveicular-47777.firebasestorage.app"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

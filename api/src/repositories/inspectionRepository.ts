@@ -46,7 +46,7 @@ export async function listInspections(filters: InspectionQuery): Promise<PageRes
   const where = bindOptionalFilters(request, filters).join(" AND ");
   request.input("offset", sql.Int, (filters.page - 1) * filters.pageSize).input("pageSize", sql.Int, filters.pageSize);
   const result = await request.query(`
-    SELECT i.id, i.code, i.vehicle_sequence AS vehicleSequence, i.inspection_date AS inspectionDate,
+    SELECT i.id, i.code, i.vehicle_sequence AS sequence, i.inspection_date AS inspectionDate,
       CONVERT(varchar(5), i.inspection_time, 108) AS inspectionTime, i.mileage, i.compliance_percentage AS compliancePercentage,
       i.compliant_count AS compliantCount, i.non_compliant_count AS nonCompliantCount, i.not_applicable_count AS notApplicableCount,
       i.result, i.general_observations AS generalObservations, i.created_at AS createdAt,

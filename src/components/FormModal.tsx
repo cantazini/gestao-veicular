@@ -9,6 +9,9 @@ type FormModalProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   pending?: boolean;
   submitLabel?: string;
+  pendingLabel?: string;
+  submitTone?: "primary" | "danger";
+  submitDisabled?: boolean;
   feedback?: ReactNode;
 };
 
@@ -20,6 +23,9 @@ export function FormModal({
   onSubmit,
   pending = false,
   submitLabel = "Salvar",
+  pendingLabel = "Salvando…",
+  submitTone = "primary",
+  submitDisabled = false,
   feedback
 }: FormModalProps) {
   const titleId = useId();
@@ -61,7 +67,7 @@ export function FormModal({
         <div className="modal-body">{children}{feedback}</div>
         <footer className="modal-footer">
           <button type="button" className="button ghost" onClick={onClose} disabled={pending}>Cancelar</button>
-          <button className="button primary" disabled={pending}>{pending ? "Salvando…" : submitLabel}</button>
+          <button className={`button ${submitTone}`} disabled={pending || submitDisabled}>{pending ? pendingLabel : submitLabel}</button>
         </footer>
       </form>
     </section>
