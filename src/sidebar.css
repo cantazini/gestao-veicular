@@ -1,0 +1,376 @@
+/* Navegação desktop compacta: expande sobre o conteúdo sem alterar o layout. */
+.nav-group-heading {
+  display: none;
+}
+
+@media (min-width: 821px) and (hover: hover) and (pointer: fine) {
+  .sidebar-auto-shell .app-main {
+    margin-left: 78px;
+    transition: none;
+  }
+
+  .sidebar-auto {
+    width: 78px;
+    overflow: hidden;
+    container-name: sidebar-shell;
+    container-type: inline-size;
+    transition:
+      width 450ms cubic-bezier(.4, 0, .2, 1),
+      box-shadow 300ms ease;
+  }
+
+  /* Um pequeno hover-intent evita abrir a navegação quando o cursor só cruza a borda. */
+  .sidebar-auto:hover {
+    width: 258px;
+    box-shadow: 16px 0 42px rgba(4, 27, 49, .2);
+    transition-delay: 80ms, 80ms;
+  }
+
+  .sidebar-auto:has(:focus-visible) {
+    width: 258px;
+    box-shadow: 16px 0 42px rgba(4, 27, 49, .2);
+    transition-delay: 0s;
+  }
+
+  /* As duas marcas ocupam a mesma região fixa e apenas fazem crossfade. */
+  .sidebar-auto .sidebar-brand {
+    position: relative;
+    flex: 0 0 96px;
+    height: 96px;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .sidebar-auto .sidebar-brand img,
+  .sidebar-auto .brand-monogram {
+    position: absolute;
+    top: 50%;
+  }
+
+  .sidebar-auto .sidebar-brand img {
+    left: 22px;
+    display: block;
+    opacity: 0;
+    visibility: hidden;
+    transform: translate(-8px, -50%);
+    transition:
+      opacity 220ms ease,
+      transform 260ms cubic-bezier(.4, 0, .2, 1),
+      visibility 0s linear 260ms;
+  }
+
+  .sidebar-auto .brand-monogram {
+    left: 20px;
+    display: grid;
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(-50%);
+    transition:
+      opacity 200ms ease,
+      transform 240ms cubic-bezier(.4, 0, .2, 1),
+      visibility 0s linear;
+  }
+
+  .sidebar-auto:hover .sidebar-brand img,
+  .sidebar-auto:has(:focus-visible) .sidebar-brand img {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(0, -50%);
+    transition-delay: 100ms, 80ms, 0s;
+  }
+
+  .sidebar-auto:hover .brand-monogram,
+  .sidebar-auto:has(:focus-visible) .brand-monogram {
+    opacity: 0;
+    visibility: hidden;
+    transform: translate(5px, -50%);
+    transition-delay: 60ms, 60ms, 260ms;
+  }
+
+  .sidebar-auto .sidebar-collapse,
+  .sidebar-auto .sidebar-close {
+    display: none;
+  }
+
+  /* A navegação recupera o ritmo vertical da referência e só rola em alturas extremas. */
+  .sidebar-auto nav {
+    --sidebar-first-group-offset: 12px;
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 24px 10px 9px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* O título ocupa uma faixa estável entre grupos sem participar do fluxo dos links. */
+  .sidebar-auto .nav-group {
+    position: relative;
+    margin: 0 0 26px;
+  }
+
+  .sidebar-auto .nav-group:first-child {
+    margin-top: var(--sidebar-first-group-offset);
+  }
+
+  .sidebar-auto .nav-group:last-child {
+    margin-bottom: 0;
+  }
+
+  .sidebar-auto .nav-group-heading {
+    position: absolute;
+    top: -16px;
+    left: 10px;
+    display: block;
+    height: 11px;
+    color: #8faac1;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(-8px);
+    transition:
+      opacity 200ms ease,
+      transform 220ms cubic-bezier(.4, 0, .2, 1),
+      visibility 0s linear 220ms;
+    pointer-events: none;
+  }
+
+  .sidebar-auto .nav-group-toggle {
+    display: none;
+  }
+
+  .sidebar-auto .nav-group-links,
+  .sidebar-auto .nav-group-links[hidden] {
+    display: grid;
+    gap: 3px;
+  }
+
+  /* A linha e a área do ícone não mudam entre os dois estados. */
+  .sidebar-auto nav a {
+    min-height: 39px;
+    padding: 0 12px 0 19px;
+    justify-content: flex-start;
+    gap: 0;
+    overflow: hidden;
+    font-size: 14px;
+  }
+
+  .sidebar-auto nav a > svg {
+    width: 19px;
+    height: 19px;
+    flex: 0 0 19px;
+  }
+
+  .sidebar-auto nav a > span,
+  .sidebar-auto .sidebar-foot > span {
+    display: block;
+    margin-left: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(-8px);
+    transition:
+      opacity 200ms ease,
+      transform 220ms cubic-bezier(.4, 0, .2, 1),
+      visibility 0s linear 220ms;
+  }
+
+  .sidebar-auto:hover .nav-group-heading,
+  .sidebar-auto:hover nav a > span,
+  .sidebar-auto:hover .sidebar-foot > span {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(0);
+    transition-delay: 100ms, 80ms, 0s;
+  }
+
+  .sidebar-auto:has(:focus-visible) .nav-group-heading,
+  .sidebar-auto:has(:focus-visible) nav a > span,
+  .sidebar-auto:has(:focus-visible) .sidebar-foot > span {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(0);
+    transition-delay: 0s;
+  }
+
+  .sidebar-auto nav a.active::after {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    margin: 0;
+  }
+
+  .sidebar-auto .sidebar-foot {
+    flex: 0 0 56px;
+    min-height: 56px;
+    padding: 19px 0 19px 30px;
+    justify-content: flex-start;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .sidebar-auto .sidebar-foot > svg {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+  }
+
+  .sidebar-auto nav a[data-tooltip]::before {
+    content: attr(data-tooltip);
+    position: fixed;
+    left: 88px;
+    z-index: 45;
+    padding: 7px 10px;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 7px;
+    background: #0d263c;
+    color: #fff;
+    box-shadow: 0 8px 24px rgba(0,0,0,.22);
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 1;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(-4px);
+    transition: opacity 100ms ease, transform 100ms ease, visibility 100ms;
+    pointer-events: none;
+  }
+
+  @container sidebar-shell (max-width: 90px) {
+    .sidebar-auto nav a[data-tooltip]:is(:hover, :focus-visible)::before {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(0);
+    }
+  }
+}
+
+@media (min-width: 821px) and (hover: hover) and (pointer: fine) and (max-height: 920px) {
+  .sidebar-auto nav {
+    padding-top: 22px;
+  }
+
+  .sidebar-auto .nav-group {
+    margin-bottom: 22px;
+  }
+
+  .sidebar-auto .nav-group-links,
+  .sidebar-auto .nav-group-links[hidden] {
+    gap: 3px;
+  }
+
+  .sidebar-auto nav a {
+    min-height: 38px;
+  }
+}
+
+/* Em telas desktop mais baixas, a densidade aumenta para manter tudo visível. */
+@media (min-width: 821px) and (hover: hover) and (pointer: fine) and (max-height: 820px) {
+  .sidebar-auto nav {
+    --sidebar-first-group-offset: 8px;
+    padding: 20px 10px 1px;
+  }
+
+  .sidebar-auto .nav-group {
+    margin-bottom: 18px;
+  }
+
+  .sidebar-auto .nav-group-heading {
+    top: -14px;
+    height: 10px;
+    line-height: 10px;
+  }
+
+  .sidebar-auto .nav-group-links,
+  .sidebar-auto .nav-group-links[hidden] {
+    gap: 2px;
+  }
+
+  .sidebar-auto nav a {
+    min-height: 33px;
+  }
+}
+
+@media (min-width: 821px) and (hover: hover) and (pointer: fine) and (max-height: 740px) {
+  .sidebar-auto nav {
+    --sidebar-first-group-offset: 6px;
+    padding: 18px 10px 6px;
+  }
+
+  .sidebar-auto .nav-group {
+    margin-bottom: 14px;
+  }
+
+  .sidebar-auto .nav-group-heading {
+    top: -13px;
+    height: 9px;
+    line-height: 9px;
+  }
+
+  .sidebar-auto .nav-group-links,
+  .sidebar-auto .nav-group-links[hidden] {
+    gap: 2px;
+  }
+
+  .sidebar-auto nav a {
+    min-height: 31px;
+  }
+}
+
+/* Tablets touch mantêm o drawer acionado pelo botão, sem depender de hover. */
+@media (max-width: 1100px) and (hover: none), (max-width: 1100px) and (pointer: coarse) {
+  .sidebar-auto-shell .sidebar,
+  .sidebar-auto-shell .sidebar-auto {
+    width: 258px;
+    transform: translateX(-100%);
+    transition: transform 200ms ease;
+  }
+
+  .sidebar-auto-shell .sidebar.open {
+    transform: none;
+  }
+
+  .sidebar-auto-shell .app-main {
+    margin-left: 0;
+  }
+
+  .sidebar-auto-shell .sidebar-close,
+  .sidebar-auto-shell .mobile-menu {
+    display: grid;
+  }
+
+  .sidebar-auto-shell .sidebar-brand {
+    padding: 18px 22px;
+  }
+
+  .sidebar-auto-shell .sidebar-brand img {
+    display: block;
+  }
+
+  .sidebar-auto-shell .brand-monogram {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-auto,
+  .sidebar-auto-shell .sidebar,
+  .sidebar-auto .sidebar-brand img,
+  .sidebar-auto .brand-monogram,
+  .sidebar-auto .nav-group-heading,
+  .sidebar-auto nav a > span,
+  .sidebar-auto .sidebar-foot > span,
+  .sidebar-auto nav a[data-tooltip]::before {
+    transition: none;
+    transition-delay: 0s;
+  }
+}

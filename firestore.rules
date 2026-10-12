@@ -52,6 +52,8 @@ service cloud.firestore {
         'vehicles',
         'vehicleDriverAssignments',
         'vehicleProjectAssignments',
+        'vehicleCompanyAssignments',
+        'driverCompanyAssignments',
         'accessProfiles',
         'documentTypes',
         'inspections',
@@ -65,6 +67,18 @@ service cloud.firestore {
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['logoStoragePath', 'updatedAt', 'updatedBy']);
+    }
+
+    match /companies/{companyId} {
+      allow update: if isOperational()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['logoStoragePath', 'updatedAt', 'updatedBy']);
+    }
+
+    match /vehicles/{vehicleId} {
+      allow update: if isOperational()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['coverStoragePath', 'updatedAt', 'updatedBy']);
     }
 
     match /documents/{documentId} {

@@ -2,14 +2,18 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BarChart3, Building2, Car, ChevronDown, ClipboardCheck, FileBadge, FileClock,
-  FileSpreadsheet, FileUp, FolderKanban, KeyRound, Menu, PanelLeftClose, PanelLeftOpen,
+  FileSpreadsheet, FileUp, FolderKanban, KeyRound, Menu,
   Settings, ShieldAlert, ShieldCheck, Truck, UserRound, Users, X
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import type { Role } from "../types";
 
 type MenuItem = { to: string; label: string; icon: typeof BarChart3; roles?: Role[] };
-type MenuGroup = { key: string; label: string; items: MenuItem[] };
+type MenuGroup = {
+  key: string;
+  label: string;
+  items: MenuItem[];
+};
 
 const menuGroups: MenuGroup[] = [
   { key: "operation", label: "Operação", items: [
@@ -29,10 +33,8 @@ const menuGroups: MenuGroup[] = [
     { to: "/documentos", label: "Documentos", icon: FileBadge },
     { to: "/credenciais", label: "Credenciais", icon: KeyRound }
   ] },
-  { key: "reports", label: "Relatórios", items: [
-    { to: "/exportar", label: "Exportar dados", icon: FileSpreadsheet }
-  ] },
-  { key: "import", label: "Importação", items: [
+  { key: "data", label: "Dados", items: [
+    { to: "/exportar", label: "Exportar dados", icon: FileSpreadsheet },
     { to: "/importar", label: "Importar dados", icon: FileUp, roles: ["admin"] }
   ] },
   { key: "admin", label: "Administração", items: [
@@ -54,13 +56,11 @@ export function AppLayout() {
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("meta.sidebar.compact") === "true");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
     try { return { ...defaultGroups, ...JSON.parse(localStorage.getItem("meta.sidebar.groups") || "{}") }; }
     catch { return defaultGroups; }
   });
 
-  useEffect(() => localStorage.setItem("meta.sidebar.compact", String(collapsed)), [collapsed]);
   useEffect(() => localStorage.setItem("meta.sidebar.groups", JSON.stringify(openGroups)), [openGroups]);
   useEffect(() => {
     const currentGroup = menuGroups.find((group) => group.items.some((item) => isMenuItemActive(location.pathname, item.to)));
@@ -70,31 +70,29 @@ export function AppLayout() {
 
   const toggleGroup = (key: string) => setOpenGroups((current) => ({ ...current, [key]: !current[key] }));
 
-  return <div className={`app-shell ${collapsed ? "sidebar-compact" : ""}`}>
-    <aside className={`sidebar ${open ? "open" : ""} ${collapsed ? "collapsed" : ""}`}>
+  return <div className="app-shell sidebar-auto-shell">
+    <aside className={`sidebar sidebar-auto ${open ? "open" : ""}`}>
       <div className="sidebar-brand">
         <img src="/assets/logo-meta-branca.png" alt="Meta Central de Serviços"/>
         <span className="brand-monogram" aria-hidden="true">M</span>
-        <button className="icon-button sidebar-collapse" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? "Expandir menu" : "Recolher menu"}>
-          {collapsed ? <PanelLeftOpen/> : <PanelLeftClose/>}
-        </button>
         <button className="icon-button sidebar-close" onClick={() => setOpen(false)} aria-label="Fechar menu"><X/></button>
       </div>
       <nav aria-label="Menu principal">
         {menuGroups.map((group) => {
           const visibleItems = group.items.filter((item) => !item.roles || item.roles.includes(user!.role));
           if (!visibleItems.length) return null;
-          const expanded = collapsed || openGroups[group.key];
+          const expanded = openGroups[group.key];
           return <section className="nav-group" key={group.key}>
+            <div className="nav-group-heading" aria-hidden="true">{group.label}</div>
             <button className="nav-group-toggle" onClick={() => toggleGroup(group.key)} aria-expanded={expanded}>
               <span>{group.label}</span><ChevronDown className={expanded ? "rotated" : ""}/>
             </button>
-            {expanded && <div className="nav-group-links">{visibleItems.map(({ to, label, icon: Icon }) => {
+            <div className="nav-group-links" hidden={!expanded}>{visibleItems.map(({ to, label, icon: Icon }) => {
               const active = isMenuItemActive(location.pathname, to);
-              return <NavLink key={to} to={to} end title={collapsed ? label : undefined} aria-current={active ? "page" : undefined} className={active ? "active" : undefined} onClick={() => setOpen(false)}>
+              return <NavLink key={to} to={to} end data-tooltip={label} aria-label={label} aria-current={active ? "page" : undefined} className={active ? "active" : undefined} onClick={() => setOpen(false)}>
                 <Icon size={19}/><span>{label}</span>
               </NavLink>;
-            })}</div>}
+            })}</div>
           </section>;
         })}
       </nav>

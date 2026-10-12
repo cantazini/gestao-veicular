@@ -1,21 +1,12 @@
 import { useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Car, Printer, ShieldCheck, Sparkles } from "lucide-react";
+import { Car, Printer, ShieldCheck, Sparkles } from "lucide-react";
 import { api } from "../lib/api";
-import { resolveClientLogo } from "../lib/branding";
-import { formatDate } from "../lib/format";
+import { isLinkedToCompany } from "../lib/companyLinks";
 import type { Entity, PageResult } from "../types";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
-
-interface Credential {
-  vehicleId: string; driverId: string; plate: string; brand: string; model: string; vehicleType: string;
-  clientId: string; clientName: string; clientLogoBlobPath?: string; companyId: string; companyName: string;
-  driverName: string; registration: string; licenseCategory: string; licenseExpiry: string;
-  accessProfileId: string; accessProfileName: string; accessProfileDescription?: string; accessProfileColor?: string;
-  credentialCode: string; eligible: boolean; reasons: string[]; credentialValidUntil: string;
-  approvalStatus: "none" | "pending" | "approved"; approvalId?: string | null; inspectionId?: string | null; canRequestApproval?: boolean; canIssue?: boolean;
-}
+import { VehicleCredential, type Credential, type CredentialAction } from "../components/VehicleCredential";
 
 const sourceNames = ["clients", "companies", "vehicles", "accessProfiles"] as const;
 const label = (item: Entity) => String(item.name || item.legalName || item.plate || item.id);
@@ -28,7 +19,7 @@ export function Credentials() {
   const sources = useQueries({ queries: sourceNames.map((name) => ({ queryKey: [name, "credential-options"], queryFn: () => api<PageResult<Entity>>(`/${name}?pageSize=100&active=true`) })) });
   const [clients, allCompanies, allVehicles, allProfiles] = sources.map((query) => query.data?.items || []);
   const companies = allCompanies.filter((item) => item.clientId === selection.clientId);
-  const vehicles = allVehicles.filter((item) => item.companyId === selection.companyId);
+  const vehicles = allVehicles.filter((item) => isLinkedToCompany(item, selection.companyId));
   const selectedVehicle = allVehicles.find((item) => item.id === selection.vehicleId);
   const profiles = allProfiles.filter((item) => item.id === selectedVehicle?.accessProfileId);
   const ready = Boolean(selection.clientId && selection.companyId && selection.vehicleId && selection.accessProfileId);
@@ -37,6 +28,8 @@ export function Credentials() {
   const cards = eligibility.data || [];
   const key = (card: Credential) => `${card.vehicleId}-${card.driverId}-${card.accessProfileId}`;
   const eligibleKeys = useMemo(() => cards.filter((card) => card.eligible).map(key), [cards]);
+  const clientLogoUrl = String(clients.find((item) => item.id === selection.clientId)?.logoBlobPath || "");
+  const linkedDriverNames = (card: Credential) => cards.filter((candidate) => candidate.vehicleId === card.vehicleId).map((candidate) => candidate.driverName);
   const update = (field: keyof typeof selection, value: string) => {
     setSelected([]);
     setSelection((current) => ({
@@ -51,7 +44,7 @@ export function Credentials() {
     const cardKey = key(card);
     setSelected((current) => current.includes(cardKey) ? current.filter((value) => value !== cardKey) : [...current, cardKey]);
   };
-  const runAction = async (card: Credential, action: "request" | "approve" | "reject" | "issue") => {
+  const runAction = async (card: Credential, action: CredentialAction) => {
     const cardKey = key(card); setActionBusy(`${cardKey}-${action}`); setMessage("");
     try {
       if (action === "request") await api("/credentials/approval-requests", { method: "POST", body: JSON.stringify({ inspectionId: card.inspectionId, vehicleId: card.vehicleId, driverId: card.driverId, accessProfileId: card.accessProfileId }) });
@@ -64,7 +57,7 @@ export function Credentials() {
     finally { setActionBusy(""); }
   };
 
-  return <>
+  return <div className="credentials-page">
     <PageHeader eyebrow="Acesso" title="Credenciais veiculares" description="A liberação exige elegibilidade operacional, aprovação administrativa e emissão registrada." actions={<button className="button primary" disabled={!selected.length} onClick={() => window.print()}><Printer/> Imprimir / Salvar PDF ({selected.length})</button>}/>
     {message && <div className="alert info" role="status">{message}</div>}
     <section className="card no-print credential-builder">
@@ -76,18 +69,7 @@ export function Credentials() {
       </div>
       <div className="credential-builder-actions"><div><ShieldCheck/><span><strong>Validação automática</strong><small>CNH, frota, documentos e vínculos são conferidos no backend.</small></span></div><button className="button secondary" disabled={!ready || !eligibleKeys.length} onClick={() => setSelected(eligibleKeys)}><Sparkles size={17}/> Gerar credencial{eligibleKeys.length > 1 ? "s" : ""}</button></div>
     </section>
-    {!ready ? <EmptyState title="Complete os quatro vínculos" text="A placa e o perfil vêm dos cadastros existentes; nenhum identificador precisa ser digitado manualmente." action={<Car/>}/> : eligibility.isLoading ? <div className="loading">Verificando elegibilidade…</div> : eligibility.isError ? <EmptyState title="Não foi possível validar a credencial" text={eligibility.error instanceof Error ? eligibility.error.message : "Tente novamente."}/> : cards.length ? <section className="credential-grid">{cards.map((card) => <CredentialCard card={card} selected={selected.includes(key(card))} onClick={() => toggle(card)} onAction={(action) => void runAction(card, action)} busy={actionBusy.startsWith(key(card))} key={key(card)}/>)}</section> : <EmptyState title="Nenhum motorista vinculado elegível para análise" text="Revise os motoristas associados ao veículo e o perfil de acesso cadastrado."/>}
-    <div className="credential-print-only">{cards.filter((card) => selected.includes(key(card))).map((card) => <CredentialCard card={card} selected={false} key={key(card)}/>)}</div>
-  </>;
-}
-
-function CredentialCard({ card, selected, onClick, onAction, busy = false }: { card: Credential; selected: boolean; onClick?: () => void; onAction?: (action: "request" | "approve" | "reject" | "issue") => void; busy?: boolean }) {
-  const registeredLogo = card.clientLogoBlobPath ? (/^(https?:|\/)/.test(card.clientLogoBlobPath) ? card.clientLogoBlobPath : `/api/clients/${card.clientId}/logo`) : null;
-  const clientLogo = resolveClientLogo(card.clientName, registeredLogo);
-  return <article className={`credential ${selected ? "selected" : ""} ${!card.eligible ? "ineligible" : ""}`} onClick={onClick} style={{ "--credential-accent": card.accessProfileColor || "#075a9c" } as React.CSSProperties}>
-    <header><div className="credential-brands"><img src="/assets/logo-meta-azul.png" alt="Meta"/>{clientLogo && <img src={clientLogo} alt={`Logo ${card.clientName}`} onError={(event) => { event.currentTarget.hidden = true; }}/>}</div>{card.eligible ? <ShieldCheck/> : <AlertTriangle/>}</header>
-    <p>Credencial de acesso veicular</p><h2>{card.plate}</h2>
-    <dl><div><dt>Cliente</dt><dd>{card.clientName}</dd></div><div><dt>Empresa</dt><dd>{card.companyName}</dd></div><div><dt>Motorista</dt><dd>{card.driverName}</dd></div><div><dt>Veículo</dt><dd>{card.brand} {card.model}</dd></div><div><dt>Perfil</dt><dd>{card.accessProfileName}</dd></div><div><dt>Válida até</dt><dd>{formatDate(card.credentialValidUntil)}</dd></div><div><dt>Código</dt><dd>{card.credentialCode}</dd></div></dl>
-    <footer><span>{card.eligible ? (selected ? "Selecionada para impressão" : "Elegível · clique para selecionar") : card.reasons.join(" · ")}</span>{onAction && <span className="credential-actions">{card.canRequestApproval && <button type="button" disabled={busy} onClick={(event) => { event.stopPropagation(); onAction("request"); }}>Solicitar aprovação</button>}{card.approvalStatus === "pending" && <><button type="button" disabled={busy} onClick={(event) => { event.stopPropagation(); onAction("approve"); }}>Aprovar análise</button><button type="button" disabled={busy} onClick={(event) => { event.stopPropagation(); onAction("reject"); }}>Rejeitar</button></>}{card.canIssue && <button type="button" disabled={busy} onClick={(event) => { event.stopPropagation(); onAction("issue"); }}>Emitir credencial</button>}</span>}</footer>
-  </article>;
+    {!ready ? <EmptyState title="Complete os quatro vínculos" text="A placa e o perfil vêm dos cadastros existentes; nenhum identificador precisa ser digitado manualmente." action={<Car/>}/> : eligibility.isLoading ? <div className="loading">Verificando elegibilidade…</div> : eligibility.isError ? <EmptyState title="Não foi possível validar a credencial" text={eligibility.error instanceof Error ? eligibility.error.message : "Tente novamente."}/> : cards.length ? <section className="credential-grid">{cards.map((card) => <VehicleCredential card={card} selected={selected.includes(key(card))} clientLogoUrl={clientLogoUrl} linkedDriverNames={linkedDriverNames(card)} onSelect={() => toggle(card)} onAction={(action) => void runAction(card, action)} busy={actionBusy.startsWith(key(card))} key={key(card)}/>)}</section> : <EmptyState title="Nenhum motorista vinculado elegível para análise" text="Revise os motoristas associados ao veículo e o perfil de acesso cadastrado."/>}
+    <div className="credential-print-only">{cards.filter((card) => selected.includes(key(card))).map((card) => <VehicleCredential card={card} clientLogoUrl={clientLogoUrl} linkedDriverNames={linkedDriverNames(card)} printCard key={key(card)}/>)}</div>
+  </div>;
 }

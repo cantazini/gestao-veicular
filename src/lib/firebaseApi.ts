@@ -1,9 +1,12 @@
-import { collection, deleteField, doc, getCountFromServer, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, updateDoc, where, type DocumentData, type QueryConstraint, type Timestamp } from "firebase/firestore";
+import { collection, deleteField, doc, getCountFromServer, getDoc, getDocs, limit, query, serverTimestamp, setDoc, updateDoc, where, type DocumentData, type QueryConstraint, type Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { deleteObject, getDownloadURL, ref } from "firebase/storage";
 import { firebaseDb, firebaseFunctions, firebaseStorage } from "../firebase/config";
 import { firebaseAuth } from "../firebase/config";
 import { ApiError } from "./api";
+import { entityCompanyIds } from "./companyLinks";
+import { classifyDocumentExpiry, countDocumentStatuses, documentWarningDays } from "./documentStatus";
+import { effectiveInspectionSequences, persistedSequence, summarizeInspectionTimeline, vehicleSequenceSummary, type SequenceCandidate } from "./inspectionTimeline";
 
 const entityCollections = new Set(["clients", "projects", "companies", "drivers", "vehicles", "accessProfiles", "users"]);
 
@@ -35,12 +38,12 @@ async function callable<T>(name: string, data: unknown): Promise<T> {
   try { return (await httpsCallable<unknown, T>(firebaseFunctions(), name)(data)).data; }
   catch (reason) {
     const code = typeof reason === "object" && reason && "code" in reason ? String((reason as { code: unknown }).code) : "";
-    const status = code.includes("invalid-argument") ? 400 : code.includes("permission-denied") ? 403 : code.includes("not-found") ? 404 : code.includes("already-exists") ? 409 : 500;
+    const status = code.includes("invalid-argument") ? 400 : code.includes("permission-denied") ? 403 : code.includes("not-found") ? 404 : code.includes("already-exists") || code.includes("failed-precondition") ? 409 : 500;
     throw new ApiError(messageOf(reason), status, typeof reason === "object" && reason && "details" in reason ? (reason as { details: unknown }).details : undefined);
   }
 }
 
-async function logoUrl(storagePath: unknown) {
+async function managedAssetUrl(storagePath: unknown) {
   if (!storagePath) return null;
   try { return await getDownloadURL(ref(firebaseStorage(), String(storagePath))); }
   catch { return null; }
@@ -48,19 +51,24 @@ async function logoUrl(storagePath: unknown) {
 
 async function listEntities(name: string, search: URLSearchParams) {
   const constraints: QueryConstraint[] = [];
+  const directory = search.get("directory") === "true" && ["clients", "projects", "companies"].includes(name);
   const activeFilter = search.get("active");
   if (activeFilter) constraints.push(where("active", "==", activeFilter === "true"));
-  constraints.push(limit(1000));
+  if (!directory) constraints.push(limit(1000));
   const snapshot = await getDocs(query(collection(firebaseDb(), name), ...constraints));
   let items = snapshot.docs.map(record);
-  if (name === "clients") items = await Promise.all(items.map(async (item) => ({ ...item, logoBlobPath: await logoUrl(item.logoStoragePath) })));
+  if (name === "clients" || name === "companies") items = await Promise.all(items.map(async (item) => ({ ...item, logoBlobPath: await managedAssetUrl(item.logoStoragePath) })));
   if (name === "vehicles") {
     const profiles = new Map((await getDocs(collection(firebaseDb(), "accessProfiles"))).docs.map((item) => [item.id, item.data()]));
-    items = items.map((item) => ({ ...item, accessProfileName: profiles.get(String(item.accessProfileId))?.name }));
+    items = await Promise.all(items.map(async (item) => ({
+      ...item,
+      accessProfileName: profiles.get(String(item.accessProfileId))?.name,
+      coverBlobPath: await managedAssetUrl(item.coverStoragePath) || item.coverBlobPath || null
+    })));
   }
   const page = Math.max(1, Number(search.get("page") || 1));
   const pageSize = Math.min(100, Math.max(1, Number(search.get("pageSize") || 25)));
-  return { items: items.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: items.length };
+  return { items: directory ? items : items.slice((page - 1) * pageSize, page * pageSize), page, pageSize: directory ? items.length : pageSize, total: items.length };
 }
 
 function inspectionSummary(item: Record<string, unknown>): Record<string, unknown> {
@@ -72,16 +80,9 @@ function inspectionSummary(item: Record<string, unknown>): Record<string, unknow
 }
 
 async function listInspections(search: URLSearchParams) {
-  const constraints: QueryConstraint[] = [];
-  const companyFilter = search.get("companyId"); const resultFilter = search.get("result");
-  if (companyFilter) constraints.push(where("companyId", "==", companyFilter));
-  else if (resultFilter) constraints.push(where("result", "==", resultFilter));
-  const startFilter = search.get("startDate"); const endFilter = search.get("endDate");
-  if (startFilter) constraints.push(where("inspectionDate", ">=", startFilter));
-  if (endFilter) constraints.push(where("inspectionDate", "<=", endFilter));
-  constraints.push(orderBy("inspectionDate", "desc"), limit(1000));
-  const snapshot = await getDocs(query(collection(firebaseDb(), "inspections"), ...constraints));
-  let items = snapshot.docs.map(record).map(inspectionSummary);
+  const snapshot = await getDocs(collection(firebaseDb(), "inspections"));
+  const history = snapshot.docs.map(record).map(inspectionSummary) as unknown as import("../types").Inspection[];
+  let items: Record<string, unknown>[] = summarizeInspectionTimeline(history).inspections;
   const match = (key: string) => { const value = search.get(key); if (value) items = items.filter((item) => String(item[key] || "") === value); };
   ["companyId", "projectId", "vehicleId", "driverId", "result"].forEach(match);
   const clientId = search.get("clientId"); if (clientId) items = items.filter((item) => String((item.snapshot as Record<string, Record<string, unknown>>)?.client?.id || "") === clientId);
@@ -95,22 +96,38 @@ async function listInspections(search: URLSearchParams) {
 async function getInspection(id: string) {
   const snapshot = await getDoc(doc(firebaseDb(), "inspections", id));
   if (!snapshot.exists()) throw new ApiError("Vistoria não encontrada.", 404);
+  if (snapshot.data().deleted === true) throw new ApiError("Vistoria excluída.", 410);
   const photos = await getDocs(collection(snapshot.ref, "photos"));
   const decorated = await Promise.all(photos.docs.filter((photo) => photo.data().active !== false).map(async (photo) => ({ ...record(photo), url: await getDownloadURL(ref(firebaseStorage(), String(photo.data().storagePath))) })));
   const value = inspectionSummary(record(snapshot));
   const clientSnapshot = (value.snapshot as Record<string, Record<string, unknown>>)?.client;
   const currentClient = clientSnapshot?.id ? await getDoc(doc(firebaseDb(), "clients", String(clientSnapshot.id))) : null;
   const clientPath = currentClient?.exists() ? currentClient.data().logoStoragePath : clientSnapshot?.logoStoragePath;
-  return { ...value, clientLogoUrl: await logoUrl(clientPath), photos: decorated };
+  const sequence = persistedSequence(value.sequence) ?? (value.vehicleId ? effectiveInspectionSequences(await vehicleInspections(String(value.vehicleId))).get(id) : undefined);
+  return { ...value, sequence, clientLogoUrl: await managedAssetUrl(clientPath), photos: decorated };
 }
 
-function documentStatus(expiryDate: unknown, warningDays = 30) {
-  if (!expiryDate) return "VALID";
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const expiry = new Date(`${String(expiryDate).slice(0, 10)}T12:00:00`);
-  if (expiry < today) return "EXPIRED";
-  const warning = new Date(today); warning.setDate(warning.getDate() + warningDays);
-  return expiry <= warning ? "EXPIRING" : "VALID";
+async function vehicleInspections(vehicleId: string) {
+  const snapshot = await getDocs(query(collection(firebaseDb(), "inspections"), where("vehicleId", "==", vehicleId)));
+  return snapshot.docs.map(record) as unknown as SequenceCandidate[];
+}
+
+async function inspectionSequenceSuggestion(search: URLSearchParams) {
+  const vehicleId = search.get("vehicleId");
+  if (!vehicleId) throw new ApiError("Selecione um veículo.", 400);
+  return vehicleSequenceSummary(await vehicleInspections(vehicleId), search.get("excludeId"));
+}
+
+async function deleteInspection(id: string) {
+  const result = await callable<{ pendingStoragePaths?: string[] } & Record<string, unknown>>("deleteInspection", { id });
+  // Fallback: se o servidor não conseguiu limpar o Storage, remove os arquivos com a sessão do usuário (storage.rules permite).
+  const pending = Array.isArray(result.pendingStoragePaths) ? result.pendingStoragePaths : [];
+  const failed: string[] = [];
+  await Promise.all(pending.map(async (storagePath) => {
+    try { await deleteObject(ref(firebaseStorage(), storagePath)); }
+    catch (reason) { if (!(typeof reason === "object" && reason && "code" in reason && String((reason as { code: unknown }).code).includes("object-not-found"))) failed.push(storagePath); }
+  }));
+  return { ...result, pendingStoragePaths: failed };
 }
 
 async function listDocuments(search: URLSearchParams) {
@@ -119,13 +136,18 @@ async function listDocuments(search: URLSearchParams) {
     getDocs(collection(firebaseDb(), "drivers")), getDocs(collection(firebaseDb(), "vehicles")), getDoc(doc(firebaseDb(), "systemSettings", "default"))
   ]);
   const maps: Record<"client" | "company" | "driver" | "vehicle", Map<string, Record<string, unknown>>> = { client: new Map(clients.docs.map((item) => [item.id, record(item)])), company: new Map(companies.docs.map((item) => [item.id, record(item)])), driver: new Map(drivers.docs.map((item) => [item.id, record(item)])), vehicle: new Map(vehicles.docs.map((item) => [item.id, record(item)])) };
-  const warning = Number(settings.data()?.documentExpiryWarningDays || settings.data()?.expiryAlertDays || 30);
+  const warning = documentWarningDays(settings.data());
   let rows: Record<string, unknown>[] = await Promise.all(documents.docs.map(async (item) => {
     const data = record(item); const entityType = String(data.entityType) as "company" | "driver" | "vehicle"; const entity: Record<string, unknown> = maps[entityType].get(String(data.entityId)) || {};
-    const company: Record<string, unknown> = entityType === "company" ? entity : maps.company.get(String(entity.companyId)) || {}; const client: Record<string, unknown> = maps.client.get(String(company.clientId)) || {};
-    return { ...data, clientId: client.id || "", clientName: client.name || client.legalName || "—", companyId: company.id || "", companyName: company.tradeName || company.legalName || "—", entityName: entity.name || entity.legalName || entity.plate || "—", entityIdentifier: entity.plate || entity.registration || entity.document || "—", documentStatus: documentStatus(data.expiryDate, warning), url: await getDownloadURL(ref(firebaseStorage(), String(data.storagePath))) };
+    // Veículos e motoristas podem atender várias empresas; a principal define cliente e nome exibidos.
+    const companyIds = entityType === "company" ? [String(entity.id || data.entityId)] : entityCompanyIds(entity);
+    const linkedCompanies = companyIds.map((id) => maps.company.get(id)).filter((company): company is Record<string, unknown> => Boolean(company));
+    const company: Record<string, unknown> = entityType === "company" ? entity : linkedCompanies[0] || {}; const client: Record<string, unknown> = maps.client.get(String(company.clientId)) || {};
+    const companyName = linkedCompanies.map((linked) => linked.tradeName || linked.legalName).filter(Boolean).join(", ") || "—";
+    return { ...data, clientId: client.id || "", clientName: client.name || client.legalName || "—", companyId: company.id || "", companyIds, companyName, entityName: entity.name || entity.legalName || entity.plate || "—", entityIdentifier: entity.plate || entity.registration || entity.document || "—", documentStatus: classifyDocumentExpiry(data.expiryDate, warning), url: await getDownloadURL(ref(firebaseStorage(), String(data.storagePath))) };
   }));
-  for (const key of ["entityType", "clientId", "companyId", "documentType"] as const) { const value = search.get(key); if (value) rows = rows.filter((item) => String(item[key]) === value); }
+  for (const key of ["entityType", "clientId", "documentType"] as const) { const value = search.get(key); if (value) rows = rows.filter((item) => String(item[key]) === value); }
+  const companyId = search.get("companyId"); if (companyId) rows = rows.filter((item) => (item.companyIds as string[]).includes(companyId));
   const status = search.get("status"); if (status) rows = rows.filter((item) => item.documentStatus === status);
   const text = search.get("search")?.toLowerCase(); if (text) rows = rows.filter((item) => Object.values(item).join(" ").toLowerCase().includes(text));
   return rows;
@@ -133,14 +155,15 @@ async function listDocuments(search: URLSearchParams) {
 
 async function dashboard() {
   const db = firebaseDb();
-  const [inspections, vehicles, drivers, companies, rejected, recent, documents, settings] = await Promise.all([
-    getCountFromServer(collection(db, "inspections")), getCountFromServer(query(collection(db, "vehicles"), where("active", "==", true))), getCountFromServer(query(collection(db, "drivers"), where("active", "==", true))),
-    getCountFromServer(query(collection(db, "companies"), where("active", "==", true))), getCountFromServer(query(collection(db, "inspections"), where("result", "==", "REPROVADO"))),
-    getDocs(query(collection(db, "inspections"), orderBy("inspectionDate", "desc"), limit(8))), getDocs(query(collection(db, "documents"), where("active", "==", true), limit(1000))), getDoc(doc(db, "systemSettings", "default"))
+  const [inspections, vehicles, drivers, companies, documents, settings] = await Promise.all([
+    getDocs(collection(db, "inspections")), getCountFromServer(query(collection(db, "vehicles"), where("active", "==", true))), getCountFromServer(query(collection(db, "drivers"), where("active", "==", true))),
+    getCountFromServer(query(collection(db, "companies"), where("active", "==", true))),
+    getDocs(query(collection(db, "documents"), where("active", "==", true), limit(1000))), getDoc(doc(db, "systemSettings", "default"))
   ]);
-  const warning = Number(settings.data()?.documentExpiryWarningDays || settings.data()?.expiryAlertDays || 30);
-  const expiringDocuments = documents.docs.filter((item) => documentStatus(item.data().expiryDate, warning) === "EXPIRING").length;
-  return { metrics: { inspections: inspections.data().count, vehicles: vehicles.data().count, drivers: drivers.data().count, companies: companies.data().count, rejected: rejected.data().count }, recentInspections: recent.docs.map(record).map(inspectionSummary), alerts: { expiringDocuments } };
+  const inspectionRows = inspections.docs.map(record).map(inspectionSummary) as unknown as import("../types").Inspection[];
+  const timeline = summarizeInspectionTimeline(inspectionRows);
+  const alerts = countDocumentStatuses(documents.docs.map((item) => item.data()), documentWarningDays(settings.data()));
+  return { metrics: { inspections: timeline.inspections.length, vehicles: vehicles.data().count, drivers: drivers.data().count, companies: companies.data().count, pendingVehicles: timeline.pendingVehicles }, recentInspections: timeline.recentInspections, alerts };
 }
 
 async function settings(method: string, body: Record<string, unknown>) {
@@ -153,7 +176,7 @@ async function exportInspections() {
   const result = await listInspections(new URLSearchParams("pageSize=1000"));
   return result.items.map((item) => {
     const snapshot = item.snapshot as Record<string, Record<string, unknown>> || {}; const output: Record<string, unknown> = {
-      ID_Vistoria: item.id, Codigo: item.code, Data: item.inspectionDate, Hora: item.inspectionTime, Fiscalizador: item.inspectorName,
+      ID_Vistoria: item.id, Codigo: item.code, Sequencia_Veiculo: item.sequence, Data: item.inspectionDate, Hora: item.inspectionTime, Fiscalizador: item.inspectorName,
       Cliente: snapshot.client?.name, Empresa: snapshot.company?.legalName, CNPJ: snapshot.company?.document, Unidade: snapshot.company?.unit, Projeto: snapshot.project?.name,
       Motorista: snapshot.driver?.name, Matricula_Motorista: snapshot.driver?.registration, Categoria_CNH: snapshot.driver?.licenseCategory, Validade_CNH: snapshot.driver?.licenseExpiry,
       Placa: snapshot.vehicle?.plate, Marca: snapshot.vehicle?.brand, Modelo: snapshot.vehicle?.model, Ano: snapshot.vehicle?.year, Tipo_Veiculo: snapshot.vehicle?.type,
@@ -169,10 +192,26 @@ export async function firebaseRequest<T>(path: string, init: RequestInit = {}): 
   if (parts[0] === "dashboard" && method === "GET") return await dashboard() as T;
   if (parts[0] === "settings") return await settings(method, bodyOf(init)) as T;
   if (parts[0] === "inspections") {
+    if (method === "GET" && parts[1] === "sequence") return await inspectionSequenceSuggestion(url.searchParams) as T;
     if (method === "GET" && parts[1]) return await getInspection(parts[1]) as T;
     if (method === "GET") return await listInspections(url.searchParams) as T;
     if (method === "POST") return await callable<T>("completeInspection", bodyOf(init));
     if (method === "PUT" && parts[1]) return await callable<T>("updateInspection", { id: parts[1], input: bodyOf(init) });
+    if (method === "DELETE" && parts[1]) return await deleteInspection(parts[1]) as T;
+  }
+  if (["clients", "companies"].includes(parts[0]) && parts[2] === "logo" && method === "DELETE") {
+    const reference = doc(firebaseDb(), parts[0], parts[1]); const snapshot = await getDoc(reference); const storagePath = snapshot.data()?.logoStoragePath;
+    if (storagePath) await deleteObject(ref(firebaseStorage(), String(storagePath))).catch(() => undefined);
+    await updateDoc(reference, { logoStoragePath: deleteField(), updatedAt: serverTimestamp(), updatedBy: firebaseAuth().currentUser?.uid || "" });
+    return undefined as T;
+  }
+  if (parts[0] === "vehicles" && parts[2] === "cover" && method === "DELETE") {
+    const reference = doc(firebaseDb(), "vehicles", parts[1]);
+    const snapshot = await getDoc(reference);
+    const storagePath = snapshot.data()?.coverStoragePath;
+    await updateDoc(reference, { coverStoragePath: deleteField(), updatedAt: serverTimestamp(), updatedBy: firebaseAuth().currentUser?.uid || "" });
+    if (storagePath) await deleteObject(ref(firebaseStorage(), String(storagePath))).catch(() => undefined);
+    return undefined as T;
   }
   if (entityCollections.has(parts[0])) {
     if (method === "GET") return await listEntities(parts[0], url.searchParams) as T;
@@ -183,9 +222,6 @@ export async function firebaseRequest<T>(path: string, init: RequestInit = {}): 
   if (parts[0] === "files" && parts[1] && method === "DELETE") {
     const reference = doc(firebaseDb(), "documents", parts[1]); const snapshot = await getDoc(reference); if (!snapshot.exists()) throw new ApiError("Arquivo não encontrado.", 404);
     await deleteObject(ref(firebaseStorage(), String(snapshot.data().storagePath))).catch(() => undefined); await updateDoc(reference, { active: false, updatedAt: serverTimestamp(), updatedBy: firebaseAuth().currentUser?.uid || "" }); return undefined as T;
-  }
-  if (parts[0] === "clients" && parts[2] === "logo" && method === "DELETE") {
-    const reference = doc(firebaseDb(), "clients", parts[1]); const snapshot = await getDoc(reference); const path = snapshot.data()?.logoStoragePath; if (path) await deleteObject(ref(firebaseStorage(), path)).catch(() => undefined); await updateDoc(reference, { logoStoragePath: deleteField(), updatedAt: serverTimestamp(), updatedBy: firebaseAuth().currentUser?.uid || "" }); return undefined as T;
   }
   if (parts[0] === "credentials" && parts[1] === "eligibility") return await callable<T>("getCredentialEligibility", Object.fromEntries(url.searchParams));
   if (parts[0] === "credentials" && parts[1] === "approval-requests" && method === "POST") return await callable<T>("requestCredentialApproval", bodyOf(init));

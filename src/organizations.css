@@ -1,0 +1,61 @@
+.organization-directory { min-width: 0; }
+.organization-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 2px 0 20px; }
+.organization-result-count { margin-right: auto; color: var(--muted); font-size: 12px; }
+.organization-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.organization-sort select { max-width: 100%; padding: 9px 12px; border: 1px solid #d7e1eb; border-radius: 9px; background: white; color: #263b50; font: inherit; }
+.organization-view { display: flex; padding: 3px; background: #f0f5fa; border: 1px solid #dfe7ef; border-radius: 10px; }
+.organization-view button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 7px; padding: 9px 12px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; }
+.organization-view button[aria-pressed=true] { background: white; color: var(--primary); box-shadow: 0 2px 5px #18395516; font-weight: 700; }
+.organization-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 18px; }
+.organization-card { min-width: 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #dfe7ef; border-radius: 14px; background: #fff; box-shadow: 0 4px 16px #16314e08; }
+.organization-card-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 20px 0; }
+.organization-symbol { display: grid; place-items: center; width: 50px; height: 50px; border-radius: 13px; color: var(--primary); background: var(--primary-soft); }
+.organization-logo { flex: none; width: 48px; height: 48px; display: grid; place-items: center; border: 1px solid #e5ebf1; border-radius: 10px; background: #fff; padding: 6px; color: #66809a; font-size: 13px; font-weight: 750; }
+.organization-logo img { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+.organization-logo--prominent { width: auto; height: 110px; margin: 16px 16px 0; border: 0; border-radius: 10px; background: #f7f9fc; padding: 18px 28px; font-size: 28px; }
+.organization-logo--prominent img { max-width: 180px; }
+.organization-card-body { flex: 1; padding: 18px 20px; }
+.organization-card h3 { margin: 0; color: var(--primary-dark); font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
+.organization-legal-name { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
+.organization-document { margin: 9px 0 0; color: #536a80; font-size: 12px; font-variant-numeric: tabular-nums; }
+.organization-code { display: block; margin-bottom: 7px; color: var(--primary); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.organization-card--projects { border-top: 3px solid #6badd7; }
+.organization-card--companies .organization-symbol { background: transparent; width: 30px; justify-items: start; }
+.organization-metadata { display: grid; gap: 12px; margin: 20px 0 0; padding-top: 15px; border-top: 1px solid #edf1f6; }
+.organization-card--companies .organization-metadata { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.organization-card--companies .organization-metadata > div:first-child { grid-column: 1 / -1; }
+.organization-metadata dt { font-size: 9px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.organization-metadata dd { margin: 5px 0 0; font-size: 12px; color: #334b61; font-weight: 600; overflow-wrap: anywhere; }
+.organization-card > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 20px; background: #fbfcfe; border-top: 1px solid #eaf0f5; }
+.organization-table table { min-width: 820px; }
+.organization-table td { white-space: normal; }
+.organization-table-identity { display: flex; align-items: center; gap: 10px; min-width: 180px; max-width: 300px; }
+.organization-table-identity strong { font-size: 12px; overflow-wrap: anywhere; }
+.organization-table-identity .organization-logo { width: 32px; height: 32px; border-radius: 7px; font-size: 9px; padding: 3px; }
+.company-parent-select { display: grid; gap: 7px; }
+.company-hierarchy-dialog { width: min(980px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); padding: 0; border: 1px solid #dce6ef; border-radius: 18px; box-shadow: 0 24px 90px #102c4855; color: var(--text); }
+.company-hierarchy-dialog::backdrop { background: #0e243e88; }
+.company-hierarchy-shell { display: flex; flex-direction: column; max-height: calc(100dvh - 44px); min-width: 0; }
+.company-hierarchy-dialog h2 { display: flex; align-items: center; gap: 10px; }
+.company-hierarchy-body { overflow: auto; padding: 20px 24px; }
+.company-hierarchy-description { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0 0 16px; }
+.company-tree-client > h3 { margin: 24px 0 12px; color: var(--primary-dark); font-size: 15px; }
+.company-tree { list-style: none; padding: 0; margin: 0; }
+.company-tree .company-tree { margin-left: 18px; padding-left: 18px; border-left: 1px solid #c9dcec; }
+.company-tree-node { display: flex; align-items: center; gap: 12px; margin: 10px 0; padding: 12px; border: 1px solid #e1e9f0; border-radius: 10px; background: #f8fafc; }
+.company-tree-node > div:nth-child(2) { flex: 1; min-width: 0; }
+.company-tree-node strong { display: block; color: #28445c; font-size: 12px; overflow-wrap: anywhere; }
+.company-tree-node small { display: block; color: var(--muted); font-size: 10px; margin-top: 5px; }
+.company-tree-node .company-tree-warning { color: #956018; }
+.company-tree-node .organization-logo { width: 34px; height: 34px; font-size: 10px; }
+@media (min-width: 740px) and (max-width: 1100px) { .organization-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 739px) {
+  .organization-grid { grid-template-columns: 1fr; }
+  .organization-toolbar { gap: 10px; }
+  .organization-result-count { width: 100%; }
+  .organization-sort { width: 100%; justify-content: space-between; }
+  .company-hierarchy-body { padding: 14px; }
+  .company-tree .company-tree { margin-left: 6px; padding-left: 7px; }
+  .company-tree-node { flex-wrap: wrap; gap: 7px; padding: 9px; }
+  .company-tree-node > div:nth-child(2) { min-width: 100px; }
+}

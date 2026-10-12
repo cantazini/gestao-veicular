@@ -3,8 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.19.0",
   "main": "lib/index.js",
-  "engines": { "node": "22" },
+  "engines": {
+    "node": "22",
+    "pnpm": "11.19.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -12,6 +16,7 @@
     "bootstrap": "node scripts/bootstrap.mjs"
   },
   "dependencies": {
+    "@google-cloud/functions-framework": "5.0.5",
     "firebase-admin": "^13.5.0",
     "firebase-functions": "^7.0.0",
     "zod": "^4.4.3"
