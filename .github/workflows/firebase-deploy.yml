@@ -44,6 +44,16 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      - run: pnpm exec firebase deploy --project gestaoveicular-47777 --non-interactive
+
+      - name: Configure Firebase Functions parameters
         env:
           APP_STORAGE_BUCKET: ${{ vars.APP_STORAGE_BUCKET }}
+        run: |
+          if [ -z "$APP_STORAGE_BUCKET" ]; then
+            echo "::error::APP_STORAGE_BUCKET não está configurado no environment firebase-production"
+            exit 1
+          fi
+
+          printf 'APP_STORAGE_BUCKET=%s\n' "$APP_STORAGE_BUCKET" > functions/.env.gestaoveicular-47777
+
+      - run: pnpm exec firebase deploy --project gestaoveicular-47777 --non-interactive
