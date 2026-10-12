@@ -45,3 +45,5 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       - run: pnpm exec firebase deploy --project gestaoveicular-47777 --non-interactive
+        env:
+          APP_STORAGE_BUCKET: ${{ vars.APP_STORAGE_BUCKET }}
